@@ -1,6 +1,6 @@
 # Atomic Bomberman: HTML5 port
 
-[![Play in your browser](https://img.shields.io/badge/%E2%96%B6%20Play-in%20your%20browser-f8d848?style=for-the-badge)](https://YOUR-USER.github.io/YOUR-REPO/web/)
+[![Play in your browser](https://img.shields.io/badge/%E2%96%B6%20Play-in%20your%20browser-f8d848?style=for-the-badge)]([[//YOUR-USER.github.io/YOUR-REPO/web/](https://danieldownes.github.io/AtomicBomberman/)](https://danieldownes.github.io/AtomicBomberman/))
 
 A browser version of Interplay/Hudson Soft's *Atomic Bomberman* (1997). It is rebuilt from the
 original CD: the graphics, sounds, music, arenas, schemes and tuning tables are the game's own,
