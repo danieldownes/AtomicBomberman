@@ -89,7 +89,7 @@
       this.dudPending = false;
       this.regen = V(340 + this.level, 0) * AB.TPS;
       this.regenTimer = this.regen;
-      this.iceDelay = Math.round(V(450 + this.level, 0) * AB.TPS / 1000);
+      // the original delays the controls on the Hockey Rink by VALUELST #452 ms ("ice"); the port leaves that out
       this.conveyorSpeed = V(190 + (this.S.conveyorSpeed | 0), 350);
       this.camp = cfg.campaign || null;     // campaign stage: {rovers, roverSpeed, ghosts, ghostSpeed}
       this.aliens = [];
@@ -170,7 +170,7 @@
         dis: new Array(AB.DIS_COUNT).fill(false), disT: 0, disFresh: 0,
         special: 0, specialT: 0,            // 1 kick, 2 punch, 3 stunned, 4 pickup, 5 trampoline, 6 warp-out, 7 warp-in, 20+ cornerhead
         cornerN: 0, held: -1, stunT: 0,
-        prevIn: 0, inBits: 0, iceQ: [],
+        prevIn: 0, inBits: 0,
         idleT: 0, idleN: pc.slot | 0,       // standing-still timer for the idle animations (cosmetic)
         kills: 0, awesomeCount: 0, tramp: null, warp: null,
         ai: pc.ai ? { plan: null, t: 0 } : null,
@@ -243,9 +243,6 @@
         const p = this.players[i];
         let bits = inputs ? (inputs[i] | 0) : 0;
         if (p.isAI && AB.AI) bits = AB.AI.think(this, p);
-        if (this.iceDelay > 0 && !p.isAI) {   // the hockey rink delays controls (#452)
-          p.iceQ.push(bits); bits = p.iceQ.length > this.iceDelay ? p.iceQ.shift() : 0;
-        }
         p.inBits = bits;
       }
       const live = this.state !== 'over';
