@@ -1,0 +1,9 @@
+{
+  "name": "atomic-bomberman-relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WebSocket relay for Atomic Bomberman HTML5 network play (lockstep inputs)",
+  "main": "relay.js",
+  "scripts": { "start": "node relay.js" },
+  "dependencies": { "ws": "^8.18.0" }
+}

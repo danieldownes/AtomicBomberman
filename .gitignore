@@ -1,0 +1,6 @@
+# the CD image (over GitHub's 100 MB file limit) and the raw files extracted from it
+*.iso
+extracted/
+# local scratch
+_xfer_*
+*.tmp

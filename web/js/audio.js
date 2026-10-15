@@ -1,0 +1,251 @@
+// Audio: every sound from the CD (.RSS, 22 kHz 16-bit stereo) re-encoded to mp3, one small script per
+// clip in audio/clips/ so they load on demand, also from file://. Music streams through <audio>.
+//
+// Sounds are organised by data/sounds.js as the original uses them: a game event is a SOUNDLST.RES id
+// range, each event holds phrases (takes that say the same words) and each phrase holds takes. Which
+// takes may play comes from a preset (child friendly / original / extended / uncensored / off) plus
+// the player's own ticks in the Sounds menu. Like the original, which keeps only part of each series
+// in memory, every round picks a fresh handful of phrases per event and loads just those clips.
+'use strict';
+(function (AB) {
+  const A = AB.audio = {};
+  const SL = window.AB_DATA.sounds;          // SOUNDLST id -> clip name
+  const CAT = window.AB_SOUNDS || { events: [], clips: {} };
+  let ctx = null, sfxGain = null;
+  const buffers = {};                        // name -> AudioBuffer | Promise | 'bad'
+  const playing = [];
+  let music = null, musicName = null, musicVol = 0.7, sfxVol = 0.9, enabled = true;
+  const MAX_CONCURRENT = 8;
+  const ids = Object.keys(SL).map(Number).sort((a, b) => a - b);
+
+  // ---- catalog indexes ----
+  const EV = CAT.events;
+  EV.forEach((e, i) => { e.i = i; e.clipList = e.groups.flatMap(g => g.clips); e.groups.forEach((g, j) => { g.i = j; }); });
+  A.events = EV;
+  A.clipInfo = (n) => CAT.clips[n] || [0, ''];
+  const evFor = (id) => EV.find(e => id >= e.lo && id <= e.hi);
+  const evOverlap = (lo, hi) => EV.filter(e => e.lo <= hi && e.hi >= lo);
+  A.eventFor = evFor;
+
+  // ---- presets / custom selection ----
+  const F = { SHIPPED: 1, EXTRA: 2, CRUDE: 4, CHILD: 8, ODD: 16, SFX: 32 };
+  A.FLAGS = F;
+  A.PRESETS = ['child', 'original', 'extended', 'uncensored', 'off'];
+  A.PRESET_LABEL = { child: 'Child friendly', original: 'Original set', extended: 'Extended (unused CD takes)', uncensored: 'Extended + uncensored', off: 'Voices off' };
+  let preset = 'extended', overrides = {}, variety = 'normal';
+  A.presetOn = function (p, e, n) {
+    const f = A.clipInfo(n)[0];
+    if (f & F.ODD) return false;
+    const base = !!(f & F.SHIPPED) || (p !== 'original' && p !== 'off' && !(f & F.CRUDE));
+    if (p === 'original') return !!(f & F.SHIPPED);
+    if (p === 'off') return (e.kind === 'sfx' || (f & F.SFX)) ? !!(f & F.SHIPPED) : false;
+    if (p === 'uncensored') return base || !!(f & F.CRUDE);
+    if (p === 'child') return base && !(f & F.CHILD);
+    return base;
+  };
+  const key = (e, n) => e.lo + ':' + n;
+  A.isOn = (e, n) => { const k = key(e, n); return k in overrides ? !!overrides[k] : A.presetOn(preset, e, n); };
+  A.setOn = function (e, n, on) {
+    const k = key(e, n);
+    if (on === A.presetOn(preset, e, n)) delete overrides[k]; else overrides[k] = on ? 1 : 0;
+    selDirty = true;
+  };
+  A.configure = function (S) {
+    preset = A.PRESETS.includes(S.voices) ? S.voices : 'extended';
+    overrides = S.soundOverrides || (S.soundOverrides = {});
+    variety = S.soundVariety || 'normal';
+    selDirty = true;
+  };
+  A.preset = () => preset;
+  A.isCustom = () => Object.keys(overrides).length > 0;
+  A.applyPreset = function (S, p) { S.voices = p; S.soundOverrides = {}; A.configure(S); };
+  A.groupState = function (e, g) { let on = 0; for (const n of g.clips) if (A.isOn(e, n)) on++; return on === 0 ? 0 : on === g.clips.length ? 2 : 1; };
+  A.eventState = function (e) { let on = 0; for (const n of e.clipList) if (A.isOn(e, n)) on++; return on === 0 ? 0 : on === e.clipList.length ? 2 : 1; };
+  A.countOn = function (e, list) { let on = 0; for (const n of list || e.clipList) if (A.isOn(e, n)) on++; return on; };
+
+  // ---- loading clips (one script per clip) ----
+  const pack = window.AB_SFX_PACK = window.AB_SFX_PACK || {};
+  const waiting = {};                        // name -> [resolve]
+  window.AB_CLIP = function (name, b64) { pack[name] = b64; const w = waiting[name]; delete waiting[name]; if (w) w.forEach(r => r(true)); };
+  const loadingScripts = {};
+  A.load = function (name) {
+    if (!name) return Promise.resolve(false);
+    if (A.isLoaded(name)) return Promise.resolve(true);
+    if (loadingScripts[name]) return loadingScripts[name];
+    const p = new Promise((res) => {
+      (waiting[name] = waiting[name] || []).push(res);
+      const s = document.createElement('script');
+      s.src = 'audio/clips/' + encodeURIComponent(name) + '.js';
+      s.onerror = () => { delete waiting[name]; res(false); };
+      s.onload = () => { s.remove(); if (waiting[name]) { delete waiting[name]; res(!!pack[name]); } };
+      document.head.appendChild(s);
+    }).then((ok) => { delete loadingScripts[name]; return ok; });
+    loadingScripts[name] = p;
+    return p;
+  };
+  A.loadMany = function (names, onProgress) {
+    const list = [...new Set(names)].filter(Boolean);
+    let done = 0;
+    return Promise.all(list.map(n => A.load(n).then(() => { done++; onProgress && onProgress(done / list.length); }))).then(() => list.length);
+  };
+  A.isLoaded = (n) => !!pack[n] || (buffers[n] && buffers[n] !== 'bad' && !(buffers[n] instanceof Promise));
+
+  // ---- per-round selection ----
+  const MULT = { few: 0.5, normal: 1, lots: 2, all: 0 };
+  A.VARIETY = ['few', 'normal', 'lots', 'all'];
+  A.VARIETY_LABEL = { few: 'Few (half)', normal: 'Normal', lots: 'Lots (double)', all: 'Everything ticked' };
+  let roundSel = null, selDirty = true;
+  const KEEP = new Set();                    // clips the menus need (never unloaded)
+  function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = AB.crand(i + 1); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+  function pickFor(e) {
+    const groups = [];
+    for (const g of e.groups) { const on = g.clips.filter(n => A.isOn(e, n)); if (on.length) groups.push(on); }
+    const m = MULT[variety];
+    if (!m) return groups.flat();                     // "everything ticked"
+    const lim = !e.limit ? Infinity : Math.max(2, Math.round(e.limit * m));
+    shuffle(groups);
+    const out = [];
+    for (const takes of groups.slice(0, lim)) out.push(takes[AB.crand(takes.length)]);
+    // few phrases on: add more takes of them so repeats still vary
+    if (groups.length < lim) for (const takes of groups) for (const n of shuffle(takes.slice())) if (!out.includes(n) && out.length < Math.min(lim, 24)) out.push(n);
+    return out;
+  }
+  // choose this round's sounds; returns a promise that resolves once they are loaded
+  A.newRound = function (onProgress) {
+    roundSel = {};
+    for (const e of EV) roundSel[e.lo] = pickFor(e);
+    selDirty = false;
+    const want = new Set(Object.values(roundSel).flat());
+    for (const n of KEEP) want.add(n);
+    // free last round's clips that are not needed now
+    for (const n of Object.keys(pack)) if (!want.has(n)) delete pack[n];
+    for (const n of Object.keys(buffers)) if (!want.has(n) && !(buffers[n] instanceof Promise)) delete buffers[n];
+    return A.loadMany([...want], onProgress);
+  };
+  A.roundSelection = () => roundSel;
+  // menus: make sure the menu/intro/quit events have something loaded
+  A.loadMenuSounds = function () {
+    const names = [];
+    for (const lo of [10, 20, 40, 2600, 2800]) {
+      const e = evFor(lo); if (!e) continue;
+      const pick = pickFor(e).slice(0, e.kind === 'voice' ? 4 : 99);
+      for (const n of pick) { names.push(n); KEEP.add(n); }
+    }
+    return A.loadMany(names);
+  };
+
+  // ---- Web Audio ----
+  A.unlock = function () {
+    if (!ctx) {
+      const C = window.AudioContext || window.webkitAudioContext;
+      if (!C) return;
+      ctx = new C();
+      sfxGain = ctx.createGain(); sfxGain.gain.value = sfxVol; sfxGain.connect(ctx.destination);
+    }
+    if (ctx.state === 'suspended') ctx.resume();
+    if (music && music.paused && musicName) music.play().catch(() => {});
+  };
+  A.ready = () => !!ctx && ctx.state === 'running';
+
+  function b64ToBuf(b64) {
+    const bin = atob(b64); const n = bin.length; const u = new Uint8Array(n);
+    for (let i = 0; i < n; i++) u[i] = bin.charCodeAt(i);
+    return u.buffer;
+  }
+  function decode(name) {
+    if (buffers[name]) return buffers[name];
+    if (!ctx || !pack[name]) return null;
+    const p = ctx.decodeAudioData(b64ToBuf(pack[name])).then(buf => {
+      // skip mp3 encoder padding / leading silence (max 60 ms) so effects stay snappy
+      const ch = buf.getChannelData(0); const lim = Math.min(ch.length, Math.floor(buf.sampleRate * 0.06));
+      let s = 0; while (s < lim && Math.abs(ch[s]) < 0.003) s++;
+      buf._start = s / buf.sampleRate;
+      buffers[name] = buf; return buf;
+    }).catch(e => { console.warn('decode failed', name, e); buffers[name] = 'bad'; });
+    buffers[name] = p;
+    return p;
+  }
+  // decode the clips of these events now (timing-critical effects)
+  A.predecode = function (lo, hi) {
+    if (!ctx) return;
+    const names = roundSel ? evOverlap(lo, hi).flatMap(e => roundSel[e.lo] || []) : [];
+    for (const n of names) if (pack[n]) decode(n);
+  };
+
+  function playBuffer(buf, vol = 1, rate = 1, tag) {
+    if (!buf || buf === 'bad' || !ctx) return null;
+    while (playing.length >= MAX_CONCURRENT) { const o = playing.shift(); try { o.stop(); } catch (e) {} }
+    const src = ctx.createBufferSource(); src.buffer = buf; src.playbackRate.value = rate;
+    let node = src;
+    if (vol !== 1) { const g = ctx.createGain(); g.gain.value = vol; src.connect(g); node = g; }
+    node.connect(sfxGain);
+    src.start(0, buf._start || 0);
+    src._tag = tag;
+    playing.push(src);
+    src.onended = () => { const i = playing.indexOf(src); if (i >= 0) playing.splice(i, 1); };
+    return src;
+  }
+  // play a clip by name (loads it first if needed; a clip arriving late is dropped unless `late`)
+  A.playName = function (name, vol, opts) {
+    if (!enabled || !ctx || !name) return;
+    const t0 = performance.now(), late = opts && opts.late, tag = opts && opts.tag;
+    const go = () => {
+      const b = decode(name);
+      if (!b) return;
+      if (b instanceof Promise) b.then(buf => { if (late || performance.now() - t0 < 400) playBuffer(buf, vol, 1, tag); });
+      else playBuffer(b, vol, 1, tag);
+    };
+    if (pack[name] || buffers[name]) go();
+    else A.load(name).then(ok => { if (ok && (late || performance.now() - t0 < 400)) go(); });
+  };
+  A.stopTag = function (tag) { for (const s of playing.slice()) if (s._tag === tag) { try { s.stop(); } catch (e) {} } };
+  // menu preview: stops the previous preview first
+  A.preview = function (name) { A.stopTag('preview'); A.playName(name, 1, { late: true, tag: 'preview' }); };
+
+  // play an exact SOUNDLST id (menus, roulette) if that clip is ticked
+  A.play = function (id, vol) {
+    const n = SL[id]; if (!n || n === '0' || n === 'xxx') return;
+    const e = evFor(id);
+    if (e && !A.isOn(e, n.toLowerCase())) return;
+    A.playName(n.toLowerCase(), vol);
+  };
+  // play a random sound for an id range [lo, hi]: this round's picks for the matching events
+  A.playRange = function (lo, hi, vol) {
+    const evs = evOverlap(lo, hi);
+    if (!evs.length) return;
+    if (selDirty && roundSel) for (const e of evs) roundSel[e.lo] = pickFor(e);
+    let c = [];
+    for (const e of evs) {
+      const sel = roundSel ? roundSel[e.lo] : null;
+      if (sel) c.push(...sel); else c.push(...e.clipList.filter(n => A.isOn(e, n)));
+    }
+    if (!c.length) return;
+    const ready = c.filter(A.isLoaded);
+    A.playName((ready.length ? ready : c)[AB.crand((ready.length ? ready : c).length)], vol);
+  };
+  A.rangeCount = function (lo, hi) { let k = 0; for (const id of ids) if (id >= lo && id <= hi) k++; return k; };
+  // a random ticked take of a phrase / event (menu preview)
+  A.sampleOf = function (e, list) { const on = list.filter(n => A.isOn(e, n)); const l = on.length ? on : list; return l[AB.crand(l.length)]; };
+
+  // ---- music ----
+  A.music = function (name, loop = true) {
+    if (name === musicName && music) return;
+    A.stopMusic();
+    if (!name) return;
+    musicName = name;
+    music = new Audio('audio/music/' + name + '.mp3');
+    music.loop = loop; music.volume = musicVol;
+    music.play().catch(() => { /* needs a user gesture; unlock() retries */ });
+  };
+  A.stopMusic = function () {
+    if (music) { try { music.pause(); } catch (e) {} music.src = ''; }
+    music = null; musicName = null;
+  };
+  A.musicName = () => musicName;
+  A.setVolumes = function (m, s) {
+    musicVol = m; sfxVol = s;
+    if (music) music.volume = m;
+    if (sfxGain) sfxGain.gain.value = s;
+  };
+  A.setEnabled = (e) => { enabled = e; };
+})(window.AB);

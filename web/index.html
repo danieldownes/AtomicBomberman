@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atomic Bomberman</title>
+<style>
+  :root { --bg: #000; --fg: #ddd; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden; }
+  body { display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; }
+  #wrap { position: relative; }
+  canvas#screen { display: block; image-rendering: pixelated; image-rendering: crisp-edges; background: #000; }
+  #loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; font-size: 14px; color: #aaa; }
+  #bar { width: 320px; height: 8px; border: 1px solid #555; }
+  #bar > div { height: 100%; width: 0; background: #e8c020; }
+  #hint { position: fixed; bottom: 6px; left: 0; right: 0; text-align: center; font-size: 11px; color: #777; pointer-events: none; transition: opacity 1.5s; }
+  #hint.gone { opacity: 0; }
+  #intro { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; display: none; }
+  #introhint { position: absolute; left: 0; right: 0; bottom: 4%; text-align: center; font-size: 13px; color: #ccc; text-shadow: 0 1px 2px #000; display: none; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="screen" width="640" height="480"></canvas>
+  <video id="intro" playsinline preload="auto"></video>
+  <div id="introhint"></div>
+  <div id="loading"><div id="lmsg">Loading Atomic Bomberman...</div><div id="bar"><div></div></div></div>
+</div>
+<div id="hint">F11 fullscreen &middot; Esc back &middot; F1 help &middot; F10 force draw &middot; M mute music</div>
+<script>
+// Loader. Over http(s) (e.g. GitHub Pages) the data files are fetched so the bar can show real download
+// progress; from file:// fetch is not allowed, so they load as plain script tags. Sizes are only for the
+// progress bar. Then the engine scripts load in order and js/main.js starts the game.
+(function () {
+  const DATA = [['data/gamedata.js', 176836], ['data/fonts.js', 23504], ['data/sprites.js', 3991153], ['data/classic.js', 13297], ['data/campaigns.js', 2542], ['data/sounds.js', 102482]];
+  const CODE = ['js/core.js', 'js/gfx.js', 'js/audio.js', 'js/input.js', 'js/game.js', 'js/ai.js', 'js/render.js',
+                'js/net.js', 'js/screens.js', 'js/screens2.js', 'js/main.js'];
+  const bar = document.querySelector('#bar > div'), msg = document.getElementById('lmsg');
+  const total = DATA.reduce((a, d) => a + d[1], 0);
+  let done = 0;
+  const show = (got) => {
+    const f = Math.min(1, got / total);
+    bar.style.width = (f * 70).toFixed(1) + '%';
+    msg.textContent = 'Loading Atomic Bomberman...  ' + (Math.min(got, total) / 1048576).toFixed(1) + ' of ' + (total / 1048576).toFixed(1) + ' MB';
+  };
+  const tag = (src) => new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = src; s.onload = res;
+    s.onerror = () => rej(new Error('could not load ' + src)); document.head.appendChild(s);
+  });
+  async function fetchRun(src, size) {
+    const r = await fetch(src);
+    if (!r.ok) throw new Error(src + ': HTTP ' + r.status);
+    let text;
+    if (r.body && r.body.getReader) {
+      const rd = r.body.getReader(), parts = []; let got = 0;
+      for (;;) {
+        const { done: end, value } = await rd.read();
+        if (end) break;
+        parts.push(value); got += value.length; show(done + Math.min(got, size));
+      }
+      const all = new Uint8Array(got); let o = 0;
+      for (const p of parts) { all.set(p, o); o += p.length; }
+      text = new TextDecoder().decode(all);
+    } else text = await r.text();
+    const s = document.createElement('script');
+    s.text = text + '\n//# sourceURL=' + src;
+    document.head.appendChild(s);
+  }
+  async function run() {
+    const http = /^https?:$/.test(location.protocol);
+    show(0);
+    for (const [src, size] of DATA) {
+      if (http) { try { await fetchRun(src, size); } catch (e) { console.warn(e); await tag(src); } }
+      else await tag(src);
+      done += size; show(done);
+    }
+    for (const src of CODE) await tag(src);
+  }
+  run().catch(e => { msg.textContent = 'Failed to start: ' + e.message; console.error(e); });
+})();
+</script>
+</body>
+</html>
