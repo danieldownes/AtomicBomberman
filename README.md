@@ -7,8 +7,14 @@ original CD: the graphics, sounds, music, arenas, schemes and tuning tables are 
 and the game logic follows the decompiled executable. It runs in any current browser, from GitHub
 Pages or straight from disk.
 
+Other sites host emulated versions of the game. This hobby project is a full reimplementation and
+iteration of the beloved classic: new code, written from the decompiled original, that plays like
+it and builds on it.
+
 Besides the original game, the port adds:
 
+* **Network play in the browser:** a lobby with three rooms showing who is in each and their
+  pings. Up to five computers and ten players, peer to peer over WebRTC, with no server to run.
 * **Campaign Mode:** the original's hidden single-player campaign, with ghosts and rovers.
 * **Sounds & Voices browser:** every recording on the CD, including about 1,050 the game never
   used, grouped by event and phrase.

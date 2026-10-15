@@ -1,20 +1,17 @@
-// Network play scaffolding (round 2 target).
+// Lockstep session for network play (the lobby and rooms are in js/netplay.js and js/netscreens.js).
 //
 // Model: deterministic lockstep, like the original (which sent player inputs over IPX/TCP/IP and
 // retransmitted "critical" packets, VALUELST #1100-1104). Every peer runs the same AB.Game with
 // the same seed/settings; only per-tick input bitmasks travel over the wire. AI players are
 // computed inside the simulation, so they never need to be sent.
 //
-//   host                        clients
-//   ----                        -------
-//   lobby: hello/join  <---->   hello
-//   start {seed, settings, scheme, level, players, inputDelay}  ---->
 //   every tick t: input {t: t+delay, slot, bits}  <---->  (all peers broadcast their local slots)
 //   every 60 ticks: sum {t, hash}  <---->  (desync detection via Game.checksum())
 //
 // Transports implement { send(obj), onmessage = fn(obj, fromId), close(), id }.
-// Provided: LoopbackHub (several sessions in one page, used for testing determinism).
-// Planned:  WebSocketTransport (tiny relay server, see NETWORK.md) and WebRTC DataChannels.
+// Used by the game: a PeerJS (WebRTC) data connection through the room's host (js/netscreens.js).
+// Also here: LoopbackHub (several sessions in one page, used for testing determinism) and
+// WebSocketTransport (for the WebSocket relay sketch in server/; the game doesn't use either).
 'use strict';
 (function (AB) {
   const Net = AB.net = {};
@@ -72,6 +69,9 @@
       this.sums = new Map();
       this.desync = null;
       this.stalls = 0;
+      this.lastFrom = {};                    // slot -> newest tick received for it
+      this.drops = [];                       // [{slots, from, done}] players whose computer left
+      this.onDrop = opts.onDrop || null;
       // pre-fill the first `delay` ticks with neutral input
       for (let t = 1; t <= this.delay; t++) { this.row(t); this.have.set(t, this.remoteSlots.length); }
       transport.onmessage = (m) => this.onMessage(m);
@@ -79,19 +79,39 @@
     row(t) { let r = this.inputs.get(t); if (!r) { r = new Int32Array(this.game.players.length); this.inputs.set(t, r); } return r; }
     onMessage(m) {
       if (m.t === 'in') {
+        if (m.tick <= this.game.tick) return;
         const r = this.row(m.tick);
-        for (const [slot, bits] of m.v) r[slot] = bits;
-        this.have.set(m.tick, (this.have.get(m.tick) || 0) + m.v.length);
+        let n = 0;
+        for (const [slot, bits] of m.v) { if (!this.remoteSlots.includes(slot)) continue; r[slot] = bits; n++; this.lastFrom[slot] = Math.max(this.lastFrom[slot] || 0, m.tick); }
+        this.have.set(m.tick, (this.have.get(m.tick) || 0) + n);
       } else if (m.t === 'sum') {
         const mine = this.sums.get(m.tick);
         if (mine !== undefined && mine !== m.hash) this.desync = { tick: m.tick, mine, theirs: m.hash };
         this.sums.set('r' + m.tick, m.hash);
       }
     }
+    // a computer left: from tick `from` on its slots need no input (the game turns them into AIs)
+    drop(slots, from) { this.drops.push({ slots, from: Math.max(from, this.delay + 1), done: false }); }
+    applyDrops(next) {
+      for (const d of this.drops) {
+        if (d.done || next < d.from) continue;
+        d.done = true;
+        this.remoteSlots = this.remoteSlots.filter(s => !d.slots.includes(s));
+        // inputs that arrived for ticks at or after `from` no longer count
+        for (const [t, r] of this.inputs) if (t >= next) { let k = 0; for (const s of this.remoteSlots) if ((this.lastFrom[s] || 0) >= t) k++; this.have.set(t, Math.min(this.have.get(t) || 0, k)); }
+        if (this.onDrop) this.onDrop(d.slots, next);
+      }
+    }
+    canStep() { const next = this.game.tick + 1; this.applyDrops(next); return (this.have.get(next) || 0) >= this.remoteSlots.length; }
+    // remote slots still missing for the next tick (to show who we are waiting for)
+    missing() { const next = this.game.tick + 1; return this.remoteSlots.filter(s => (this.lastFrom[s] || (next <= this.delay ? next : 0)) < next); }
+    // ticks ready to run beyond the next one (catch-up after a stall)
+    backlog() { let k = 0; for (let t = this.game.tick + 1; ; t++) { if ((this.have.get(t) || 0) < this.remoteSlots.length) break; k++; if (k > 30) break; } return k; }
     // call once per local 60 Hz tick; returns true if the simulation advanced
     update() {
       const g = this.game;
       const next = g.tick + 1;
+      this.applyDrops(next);
       // schedule our local input for next + delay
       const target = next + this.delay - 1 + 1;
       if (this.sentUpTo < target) {

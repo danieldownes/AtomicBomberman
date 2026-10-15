@@ -1,4 +1,5 @@
-// Minimal WebSocket relay for Atomic Bomberman network play (round 2 groundwork).
+// Minimal WebSocket relay for lockstep inputs: an early sketch, NOT used by the game, which plays over
+// PeerJS / WebRTC instead (see NETWORK.md). Kept as a starting point for a self-hosted alternative.
 // Usage:  cd server && npm install ws && node relay.js [port]
 // Clients (js/net.js WebSocketTransport) send {t:'join', room} then {t:'relay', data}.
 // The relay assigns peer ids and forwards every message to the other members of the room.

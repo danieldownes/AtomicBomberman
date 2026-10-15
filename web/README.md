@@ -42,7 +42,7 @@ Other keys:
 
 The original has a hidden single-player campaign: pressing C five times on its Player Setup screen
 opens it, and that still works here. The port also lists it on the main menu, in place of
-"Start Network Game"; network play is under "Network Game".
+"Start Network Game"; network play is under "Network Game" (below).
 
 * There are three campaigns from the CD: *Simple* (4 stages), *Croutons* (9) and *Ghost Towns* (4).
 * Each stage sets the arena, the scheme, how many ghosts and rovers there are and how fast they
@@ -54,6 +54,25 @@ opens it, and that still works here. The port also lists it on the main menu, in
 * The humans are the keyboard and joystick players from Start Game > Player Setup (KEY 0 if there
   are none).
 * Stages you have cleared are remembered. Left/Right on the campaign screen picks a starting stage.
+
+## Network Game
+
+Main menu > **Network Game** plays against people on other computers, straight from the browser.
+There is nothing to install or host.
+
+* The lobby has three fixed rooms. Pick an empty one to host it, or a waiting one to join. Each
+  room shows who is in it, their pings and the host's settings.
+* In the room, the host adds computer players with Left/Right and starts with Enter. Up to five
+  computers and ten players can play, as in the original. Each computer brings the keyboard and
+  joystick players from Start Game > Player Setup.
+* The match uses the host's Options and Arena & Match settings. Team play and the Gold Bomberman
+  roulette are off online.
+* Every computer runs the same simulation in lockstep, and only key presses are sent. If someone
+  leaves, their players carry on as computer players.
+* Keep the game in the front tab while playing: browsers slow down background tabs.
+
+It runs over WebRTC using PeerJS's free public matchmaking and relay servers. Details, and how to use
+your own servers, are in NETWORK.md.
 
 ## Arenas
 
@@ -117,7 +136,11 @@ js/render.js        drawing with the original sprites
 js/screens.js       menus, results, victory, roulette, online manual, credits, intro movie
 js/screens2.js      Sounds & Voices browser, Arenas, Campaign Mode
 js/gfx.js, audio.js, input.js
-js/net.js           lockstep networking scaffolding (see NETWORK.md)
+js/net.js           lockstep session: input delay, stalls, checksums, drop-outs (see NETWORK.md)
+js/netplay.js       network rooms over PeerJS/WebRTC: hosting, joining, pings, relaying
+js/netscreens.js    the network lobby and room screens, and the match controller
+js/netconfig.js     optional matchmaking/relay server settings (empty by default)
+js/vendor/          PeerJS 1.5.5 (MIT), loaded only for network games
 data/gamedata.js    VALUELST.RES, MESSAGES.TXT, SOUNDLST.RES, all 67 .SCH schemes, EXTRA*.RES, *.BM help
 data/sprites.js     the .ANI sprite files (frames + sequences) as atlases, plus the unused idle and classic sets
 data/classic.js     the Classic arena's tiles, bombs and flames (new art)

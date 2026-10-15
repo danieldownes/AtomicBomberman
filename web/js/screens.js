@@ -1,5 +1,6 @@
 // Screens: logos, title, main menu, player setup, level/options, settings, keys, game, results,
-// draw, victory, gold-bomberman roulette, online help, credits, network placeholder.
+// draw, victory, gold-bomberman roulette, online help, credits, intro movie.
+// (Network lobby and rooms: js/netscreens.js.)
 // Layout coordinates come from VALUELST.RES (#700-#815) and texts from MESSAGES.TXT where possible.
 'use strict';
 (function (AB) {
@@ -433,11 +434,18 @@
       this.a = a; this.t = 0; this.n = Math.floor(Math.random() * AB.val(16, 7)); this.prog = 0; this.done = false; this.img = false;
       A.newRound((f) => { this.prog = f; }).then(() => { this.done = true; });
       G.preloadImages(a.level !== undefined ? ['field' + a.level] : []).then(() => { this.img = true; });
+      this.readySent = false;
     },
-    // go on once the sounds and the arena picture are in (or after 8 s on a slow connection)
-    tick() { if (++this.t > 40 && ((this.done && this.img) || this.t > AB.TPS * 8)) this.a.then(); },
+    // go on once the sounds and the arena picture are in (or after 8 s on a slow connection);
+    // a network round then waits until the host says every computer is ready
+    tick() {
+      const loaded = ++this.t > 40 && ((this.done && this.img) || this.t > AB.TPS * 8);
+      if (!this.a.net) { if (loaded) this.a.then(); return; }
+      if (loaded && !this.readySent) { this.readySent = true; AB.netmatch.ready(this.a.net); }
+      if (this.readySent && AB.netmatch.goRound === this.a.net) this.a.then();
+    },
     render(ctx) {
-      glue(ctx, this.n); centerText(ctx, AB.msg(201, 'Loading data...'), 232, WHITE);
+      glue(ctx, this.n); centerText(ctx, this.readySent ? 'Waiting for the other computers...' : AB.msg(201, 'Loading data...'), 232, WHITE);
       if (!this.done && this.t > 20) { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(220, 256, 200, 6); ctx.fillStyle = YELLOW; ctx.fillRect(220, 256, 200 * this.prog, 6); }
     },
   });
@@ -452,17 +460,21 @@
       const M = AB.match;
       const S = Object.assign({}, AB.settings);
       if (M.demo) { S.playTime = 90; S.arenas = {}; }
+      // network round: the host decided arena, seed and settings (js/netscreens.js)
+      const net = this.net = arg.net || null;
+      if (net) Object.assign(S, net.sim);
       // pick an arena: a campaign stage names one, otherwise one of the ticked arenas
-      let level = arg.level !== undefined ? arg.level : AB.testLevel !== undefined ? AB.testLevel : AB.pickArena(S);
+      let level = net ? net.level : arg.level !== undefined ? arg.level : AB.testLevel !== undefined ? AB.testLevel : AB.pickArena(S);
       if (arg.scheme) S.scheme = arg.scheme;
       const scheme = window.AB_DATA.schemes[S.scheme] || window.AB_DATA.schemes.basic;
-      const seed = (Math.random() * 0xffffffff) >>> 0;
+      const seed = net ? net.seed : (Math.random() * 0xffffffff) >>> 0;
       const players = M.players.map(p => Object.assign({}, p, { bonus: M.bonus && M.bonus.slot === p.slot && M.round === 1 ? M.bonus.pw : -1 }));
       if (arg.campaign) S.teamPlay = false;
       this.g = new AB.Game({ settings: S, scheme, level, seed, players, match: M, campaign: arg.campaign || null });
       AB.curGame = this.g;
       this.devices = M.players.map(p => p.control.startsWith('key') ? { type: 'key', n: +p.control.slice(3) } : p.control.startsWith('joy') ? { type: 'joy', n: +p.control.slice(3) } : null);
-      this.t = 0; this.overT = 0; this.paused = false; this.quitAsk = false;
+      this.t = 0; this.overT = 0; this.paused = false; this.quitAsk = false; this.stallT = 0; this.desync = false;
+      this.session = net ? AB.netmatch.makeSession(this.g, this.devices, net) : null;
       const track = AB.gameTrack(S, level);
       if (track) A.music(track); else A.stopMusic();
       // warm up recoloured sprites for the players in this round
@@ -476,11 +488,15 @@
       if (k.pad !== undefined && !this.quitAsk && !k.start) return;    // pads drive players, not menus
       const playerKey = I.layouts.some(L => Object.values(L).includes(k.code));
       if (this.quitAsk) {
-        if (k.code === 'KeyY' || isOK(k)) { A.playRange(2600, 2699); AB.match = null; SC.go('mainmenu'); }
-        else this.quitAsk = false;
+        if (k.code === 'KeyY' || isOK(k)) {
+          A.playRange(2600, 2699);
+          if (this.net) { AB.netmatch.quit(); return; }
+          AB.match = null; SC.go('mainmenu');
+        } else this.quitAsk = false;
         return;
       }
       if (k.code === 'Escape' || (k.code === 'KeyQ' && k.ctrl)) { this.quitAsk = true; return; }
+      if (this.net) return;     // no pause or forced draw in a network game: every computer must stay in step
       if ((k.code === 'KeyP' && !playerKey) || k.code === 'Pause') this.paused = !this.paused;
       if (k.code === 'F10') this.g.forceDraw();
     },
@@ -488,10 +504,25 @@
       const g = this.g;
       this.t++;
       if (this.t === 30 && !AB.match.demo) A.playRange(9000, 9000);    // round-start announcer (unused CD lines)
-      if (this.paused || this.quitAsk || AB.debugFreeze) return;
-      const inputs = this.devices.map(d => I.read(d));
-      g.step(inputs);
-      for (const e of g.events) this.onEvent(e);
+      if (this.session) {
+        // lockstep: advance only when every computer's input for the next tick is here; catch up
+        // by one extra tick when we have fallen behind
+        const s = this.session;
+        let steps = 0;
+        while (steps < 2 && !this.desync) {
+          if (!s.update()) break;
+          steps++;
+          for (const e of g.events) this.onEvent(e);
+          if (s.desync) { this.desync = true; console.warn('desync', s.desync); }
+          if (s.backlog() < 2) break;
+        }
+        this.stallT = steps ? 0 : this.stallT + 1;
+      } else {
+        if (this.paused || this.quitAsk || AB.debugFreeze) return;
+        const inputs = this.devices.map(d => I.read(d));
+        g.step(inputs);
+        for (const e of g.events) this.onEvent(e);
+      }
       if (g.state === 'over') {
         // the winner gets to run around for a few seconds; a forced draw (F10) ends right away
         const r = g.result, wait = r.forced ? 0.25 : AB.match.campaign ? 2.5 : r.draw ? 2.5 : 5;
@@ -535,11 +566,18 @@
         G.text(ctx, txt, 515, 28, ai + gh + ro ? WHITE : '#60f060', 'font0', 2);
       }
       if (M && M.demo && blink()) { panel(ctx, 230, 450, 180, 24, 0.7); centerText(ctx, 'DEMO - press any key', 454, YELLOW, 'font0'); }
+      if (this.session && this.stallT > 20) {
+        const who = this.session.missing().map(i => this.g.players[i] && this.g.players[i].name).filter(Boolean);
+        panel(ctx, 140, 220, 360, 44, 0.85);
+        centerText(ctx, 'Waiting for ' + (who.length ? [...new Set(who)].join(', ') : 'the other computers') + '...', 228, YELLOW, 'font0');
+        centerText(ctx, Math.floor(this.stallT / AB.TPS) + ' s', 246, GREY, 'font0');
+      }
+      if (this.desync) { panel(ctx, 120, 200, 400, 60, 0.92); centerText(ctx, 'The computers are out of sync.', 214, ORANGE); centerText(ctx, 'Press Esc to leave the match.', 238, WHITE, 'font0'); }
       if (this.paused) { panel(ctx, 220, 210, 200, 50, 0.85); centerText(ctx, 'PAUSED', 226, YELLOW); }
       if (this.quitAsk) {
         panel(ctx, 160, 200, 320, 80, 0.88);
         centerText(ctx, 'Quit this match?', 218, YELLOW);
-        centerText(ctx, 'Y = quit to main menu    other = resume', 246, WHITE, 'font0');
+        centerText(ctx, this.net ? 'Y = leave the network game    other = resume' : 'Y = quit to main menu    other = resume', 246, WHITE, 'font0');
       }
     },
   });
@@ -552,8 +590,13 @@
     render(ctx) { G.blit(ctx, 'draw', 0, 0); },
   });
 
+  // match rules: a network match uses the host's settings
+  const MS = () => (AB.match && AB.match.S) || AB.settings;
+  // network matches name their players ("Alice", "Computer 1"); local ones say "Player 3" like the original
+  const netName = (slot) => { const M = AB.match, p = M && M.net && M.players.find(q => q.slot === slot); return p ? p.name : null; };
+  const pLabel = (slot) => netName(slot) || AB.msg(33, 'Player %u').replace('%u', slot + 1);
   function matchWinner() {
-    const M = AB.match, S = AB.settings;
+    const M = AB.match, S = MS();
     const need = S.winsNeeded;
     const score = (p) => (S.winByKills ? (M.kills[p.slot] || 0) : (M.wins[p.slot] || 0));
     if (S.teamPlay) {
@@ -575,10 +618,16 @@
     return best;
   }
 
+  AB.matchWinner = () => matchWinner();
   SC.register('results', {
     enter() { this.t = 0; A.music('lose', false); this.winner = matchWinner(); },
     key(k) {
       if (this.t < 30) return;
+      if (AB.match && AB.match.net) {
+        if (isBack(k) && k.pad === undefined && !AB.netplay.isHost()) { AB.netmatch.quit(); return; }
+        if ((isOK(k) || isBack(k)) && AB.netplay.isHost()) AB.netmatch.hostContinue(this.winner);
+        return;
+      }
       if (isOK(k) || isBack(k)) {
         if (isBack(k) && !this.winner && k.pad === undefined) { AB.match = null; SC.go('mainmenu'); return; }
         if (this.winner) SC.go('victory', this.winner); else nextRound();
@@ -587,10 +636,11 @@
     tick() { this.t++; },
     render(ctx) {
       G.blit(ctx, 'results', 0, 0);
-      const M = AB.match, S = AB.settings, res = M.lastResult;
+      const M = AB.match, S = MS(), res = M.lastResult;
       const top = AB.val(800, [150, 94]), hd = AB.val(780, [150, 140]), row = AB.val(785, [150, 210, 20]);
       if (this.winner) {
-        const t = S.teamPlay && this.winner.team !== undefined ? AB.msg(34, 'Team %u').replace('%u', this.winner.team + 1).toUpperCase() + ' WINS THE MATCH!' : AB.msg(36, 'PLAYER %u WINS THE MATCH!').replace('%u', this.winner.p.slot + 1);
+        const t = S.teamPlay && this.winner.team !== undefined ? AB.msg(34, 'Team %u').replace('%u', this.winner.team + 1).toUpperCase() + ' WINS THE MATCH!'
+          : netName(this.winner.p.slot) ? netName(this.winner.p.slot).toUpperCase() + ' WINS THE MATCH!' : AB.msg(36, 'PLAYER %u WINS THE MATCH!').replace('%u', this.winner.p.slot + 1);
         G.text(ctx, t, top[0], top[1], YELLOW, 'font1');
       } else {
         G.text(ctx, S.winByKills ? AB.msg(121, '(Match winner must score %u kills)').replace('%u', S.winsNeeded) : AB.msg(120, '(Match winner must score %u victories)').replace('%u', S.winsNeeded), top[0], top[1], GREY, 'font1');
@@ -598,14 +648,15 @@
       let head;
       if (!res || res.draw || !res.winner) head = AB.msg(30, 'Game Winner was %s !').replace('%s', AB.msg(32, 'undetermined'));
       else if (res.winner.team !== undefined) head = AB.msg(30, 'Game Winner was %s !').replace('%s', AB.msg(34, 'Team %u').replace('%u', res.winner.team + 1));
-      else head = AB.msg(30, 'Game Winner was %s !').replace('%s', AB.msg(33, 'Player %u').replace('%u', res.winner.slot + 1));
+      else head = AB.msg(30, 'Game Winner was %s !').replace('%s', pLabel(res.winner.slot));
       G.text(ctx, head, hd[0], hd[1], WHITE, 'font1');
       const wz = G.image('winz');
       M.players.forEach((p, i) => {
         const y = row[1] + i * row[2];
         const won = res && res.winner && res.winner.players.includes(p.slot);
         miniHead(ctx, p.color, row[0] - 16, y);
-        const line = AB.msg(31, 'Player %u score: %u (kills: %d)').replace('%u', p.slot + 1).replace('%u', M.wins[p.slot] || 0).replace('%d', M.kills[p.slot] || 0);
+        let line = AB.msg(31, 'Player %u score: %u (kills: %d)').replace('%u', p.slot + 1).replace('%u', M.wins[p.slot] || 0).replace('%d', M.kills[p.slot] || 0);
+        if (netName(p.slot)) line = line.replace(AB.msg(33, 'Player %u').replace('%u', p.slot + 1), netName(p.slot));
         G.text(ctx, line, row[0], y, won ? YELLOW : WHITE, 'font1');
         const w = M.wins[p.slot] || 0;
         for (let k = 0; k < w; k++) {
@@ -613,7 +664,8 @@
           miniHead(ctx, p.color, 429 + k * 20, y + 1);
         }
       });
-      if (this.t > 30 && blink()) centerText(ctx, this.winner ? 'Press bomb to continue' : 'Press bomb for the next round   (Esc: quit match)', 440, WHITE, 'font0');
+      if (M.net && !AB.netplay.isHost()) { if (this.t > 30) centerText(ctx, 'Waiting for the host...   (Esc: leave the network game)', 440, GREY, 'font0'); }
+      else if (this.t > 30 && blink()) centerText(ctx, this.winner ? 'Press bomb to continue' : M.net ? 'Press bomb for the next round' : 'Press bomb for the next round   (Esc: quit match)', 440, WHITE, 'font0');
     },
   });
 
@@ -625,17 +677,23 @@
     },
     key(k) {
       if (this.t < 40) return;
+      if (AB.match && AB.match.net) {
+        if (AB.netplay.isHost() && (isOK(k) || isBack(k))) AB.netmatch.hostEnd();
+        else if (isBack(k) && k.pad === undefined) AB.netmatch.quit();
+        return;
+      }
       if (isOK(k) || isBack(k)) {
-        if (AB.settings.goldBomberman && !AB.match.demo) SC.go('roulette', this.w);
+        if (MS().goldBomberman && !AB.match.demo) SC.go('roulette', this.w);
         else { AB.match = null; SC.go('players'); }
       }
     },
     tick() { this.t++; },
     render(ctx) {
       const w = this.w;
-      if (AB.settings.teamPlay && w.team !== undefined) G.blit(ctx, 'team' + (w.team ? 1 : 0), 0, 0);
+      if (MS().teamPlay && w.team !== undefined) G.blit(ctx, 'team' + (w.team ? 1 : 0), 0, 0);
       else G.blit(ctx, 'victory' + w.p.color, 0, 0);
-      const txt = AB.settings.teamPlay && w.team !== undefined ? `TEAM ${w.team ? 'RED' : 'WHITE'} WINS THE MATCH!` : AB.msg(36, 'PLAYER %u WINS THE MATCH!').replace('%u', w.p.slot + 1);
+      const txt = MS().teamPlay && w.team !== undefined ? `TEAM ${w.team ? 'RED' : 'WHITE'} WINS THE MATCH!`
+        : netName(w.p.slot) ? netName(w.p.slot).toUpperCase() + ' WINS THE MATCH!' : AB.msg(36, 'PLAYER %u WINS THE MATCH!').replace('%u', w.p.slot + 1);
       panel(ctx, 120, 412, 400, 34, 0.55);
       centerText(ctx, txt, 420, YELLOW);
     },
@@ -854,7 +912,7 @@
     enter(a) {
       this.back = (a && a.back) || 'mainmenu';
       const H = window.AB_DATA.help;
-      this.files = Object.keys(H).filter(k => k !== 'highmem' && k !== 'lowmem').sort();
+      this.files = Object.keys(H).filter(k => k !== 'highmem' && k !== 'lowmem' && !k.startsWith('port')).sort();   // port* = the port's own pages, opened with F1
       this.file = a && a.file && H[a.file] ? a.file : null;
       this.sel = 0; this.scroll = 0;
     },
@@ -922,30 +980,6 @@
     },
   });
 
-  // ================================================================= NETWORK (planned)
-  SC.register('network', {
-    help: 'network',
-    enter(a) { this.host = a && a.host; A.music('network', false); },
-    key(k) { if (isBack(k) || isOK(k)) SC.go('mainmenu'); },
-    render(ctx) {
-      glue(ctx, 6);
-      panel(ctx, 60, 80, 520, 320, 0.85);
-      centerText(ctx, 'NETWORK GAME', 100, YELLOW);
-      const msg = [
-        'Network play is not in this first version of the port.',
-        '',
-        'The engine is already built for it: the simulation is',
-        'deterministic and driven only by per-tick inputs, and a',
-        'lockstep session layer is included (js/net.js). A small',
-        'WebSocket relay or WebRTC transport is the remaining piece.',
-        'See NETWORK.md for the plan.',
-        '',
-        AB.msg(66, "Our Nodename is: '%s'").replace('%s', AB.msg(500 + (Math.abs(hashStr(navigator.userAgent)) % AB.val(47, 49)), 'Bomberman')),
-      ];
-      msg.forEach((s, i) => centerText(ctx, s, 140 + i * 24, i === msg.length - 1 ? CYAN : WHITE, 'font0'));
-      centerText(ctx, 'Press Esc to return', 370, GREY, 'font0');
-    },
-  });
   function hashStr(s) { let h = 0; for (const c of s) h = (Math.imul(h, 31) + c.charCodeAt(0)) | 0; return h; }
 
   // ================================================================= TEST (developer)
