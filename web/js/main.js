@@ -33,6 +33,8 @@
     await AB.gfx.load((f) => { bar.style.width = Math.round(70 + f * 22) + '%'; });
     msg.textContent = 'Loading pictures...';
     await AB.gfx.preloadImages(['title', 'mainmenu_port', 'glue0', 'iplogo', 'hslogo']);
+    // while the menus are up, fetch the loading pictures and the end-of-round screens in the background
+    AB.gfx.prefetch(['glue1', 'glue2', 'glue3', 'glue4', 'glue5', 'glue6', 'results', 'draw', 'winz']);
     bar.style.width = '96%';
     // sounds load on demand (audio/clips); the menus need only a few right away
     AB.audio.configure(AB.settings);

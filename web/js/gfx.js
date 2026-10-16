@@ -162,21 +162,52 @@
   };
 
   // ---- background pictures ----
-  gfx.image = function (name) {
-    if (!images[name]) {
-      const im = new Image();
-      im.src = 'img/' + name + '.png';
-      images[name] = im;
-    }
+  // A screen that draws a picture that hasn't arrived yet just shows nothing there, so the screens that
+  // need one load it first (gfx.loadImage), and the ones likely to come next are fetched quietly in the
+  // background, one at a time, at low priority (gfx.prefetch).
+  const newImage = (name, priority, attempt) => {
+    const im = new Image();
+    if (priority && 'fetchPriority' in im) im.fetchPriority = priority;
+    im.src = 'img/' + name + '.png' + (attempt ? '?retry=' + attempt : '');
+    return im;
+  };
+  gfx.image = function (name, priority) {
+    if (!images[name]) images[name] = newImage(name, priority, 0);
     return images[name];
   };
-  gfx.preloadImages = function (names) {
-    return Promise.all(names.map(n => new Promise(res => {
-      const im = gfx.image(n);
-      if (im.complete && im.naturalWidth) return res();
-      im.addEventListener('load', res, { once: true });
-      im.addEventListener('error', res, { once: true });
-    })));
+  gfx.isLoaded = (name) => { const im = images[name]; return !!(im && im.complete && im.naturalWidth); };
+  // resolves true once the picture is in, false if it still failed after `retries` more tries
+  gfx.loadImage = function (name, opts) {
+    const priority = (opts && opts.priority) || 'auto', retries = opts && opts.retries !== undefined ? opts.retries : 2;
+    return new Promise((res) => {
+      let tries = 0;
+      const watch = (im) => {
+        if (im.complete) { if (im.naturalWidth) res(true); else failed(); return; }
+        im.addEventListener('load', () => res(true), { once: true });
+        im.addEventListener('error', failed, { once: true });
+      };
+      const failed = () => {
+        if (tries >= retries) { console.warn('picture failed to load:', name); res(false); return; }
+        tries++;
+        setTimeout(() => { images[name] = newImage(name, priority, tries); watch(images[name]); }, 700 * tries);
+      };
+      watch(gfx.image(name, priority));
+    });
+  };
+  gfx.preloadImages = (names, opts) => Promise.all(names.map(n => gfx.loadImage(n, opts)));
+  const later = [];
+  let prefetching = false;
+  gfx.prefetch = function (names) {
+    for (const n of names) if (!gfx.isLoaded(n) && !later.includes(n)) later.push(n);
+    if (prefetching) return;
+    prefetching = true;
+    const next = () => {
+      const n = later.shift();
+      if (n === undefined) { prefetching = false; return; }
+      if (gfx.isLoaded(n)) { next(); return; }
+      gfx.loadImage(n, { priority: 'low', retries: 1 }).then(next);
+    };
+    next();
   };
   gfx.blit = function (ctx, name, x = 0, y = 0) {
     const im = gfx.image(name);

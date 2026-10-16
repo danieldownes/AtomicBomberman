@@ -104,7 +104,7 @@ with "Could not reach the room host (a strict network may need a relay)."
 | `ping {ts}` / `pong {ts}` | host and member | round trip every second; the shown ping is smoothed |
 | `start {cfg}` | host to members | one round: number, seed, arena, rules, players (slot, name, owner computer, AI), input delay |
 | `ready {round}` | member to host | arena loaded |
-| `go {round}` | host to members | everyone has loaded (or 12 s passed): start the clock |
+| `go {round}` | host to members | everyone has loaded the arena picture and sound effects (or 45 s passed): start the clock |
 | `ls {r, m}` | member to host to others | a lockstep message (`in` inputs or `sum` checksum) for round `r` |
 | `drop {round, slots, from}` | host to members | those players need no more input from tick `from` |
 | `victory` | host to members | the match is won: show the victory screen |

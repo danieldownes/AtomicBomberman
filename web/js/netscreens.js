@@ -124,12 +124,18 @@
     NM.readyAt = performance.now();
     if (NP.isHost()) { NM.myReady = round; NM.checkGo(); } else NP.send({ t: 'ready', round });
   };
+  // (a slow connection may need a while for the arena picture and the sounds: wait up to 45 s for it)
   NM.checkGo = function () {
     const room = NP.room; if (!room || !room.host || !NM.cfg) return;
     const r = NM.cfg.round;
     if (NM.myReady !== r || NM.goRound === r) return;
     const all = room.members.slice(1).every(m => m.ready === r);
-    if (all || performance.now() - NM.readyAt > 12000) { NP.send({ t: 'go', round: r }); NM.goRound = r; }
+    if (all || performance.now() - NM.readyAt > 45000) { NP.send({ t: 'go', round: r }); NM.goRound = r; }
+  };
+  // host, while loading: the computers that haven't finished yet
+  NM.waitingFor = function () {
+    const room = NP.room; if (!room || !room.host || !NM.cfg) return [];
+    return room.members.slice(1).filter(m => m.ready !== NM.cfg.round).map(m => m.name);
   };
   setInterval(() => { if (NP.isHost() && NM.cfg && NM.goRound !== NM.cfg.round) NM.checkGo(); }, 500);
   // host: a computer left mid-round -> its players stop needing input from the next tick it never sent

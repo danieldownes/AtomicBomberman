@@ -68,17 +68,38 @@
   const waiting = {};                        // name -> [resolve]
   window.AB_CLIP = function (name, b64) { pack[name] = b64; const w = waiting[name]; delete waiting[name]; if (w) w.forEach(r => r(true)); };
   const loadingScripts = {};
-  A.load = function (name) {
+  // At most MAX_DOWNLOADS clips download at once, sound effects (lane 0) before voices (lane 1), so the
+  // arena picture and the effects a round can't do without aren't stuck behind a hundred voice clips.
+  const MAX_DOWNLOADS = 8;
+  const lanes = [[], []];
+  let inflight = 0;
+  function pump() {
+    while (inflight < MAX_DOWNLOADS) {
+      const q = lanes[0].length ? lanes[0] : lanes[1];
+      if (!q.length) return;
+      const start = q.shift();
+      inflight++;
+      start().then(() => { inflight--; pump(); });
+    }
+  }
+  const isSfxClip = (n) => !!(((CAT.clips[n] || [0])[0]) & 32);
+  const settle = (name, ok) => { const w = waiting[name]; delete waiting[name]; if (w) w.forEach(r => r(ok)); };
+  // lane: 0 = needed now (effects, a sound asked for this moment), 1 = can wait; default by kind
+  A.load = function (name, lane) {
     if (!name) return Promise.resolve(false);
     if (A.isLoaded(name)) return Promise.resolve(true);
     if (loadingScripts[name]) return loadingScripts[name];
     const p = new Promise((res) => {
       (waiting[name] = waiting[name] || []).push(res);
-      const s = document.createElement('script');
-      s.src = 'audio/clips/' + encodeURIComponent(name) + '.js';
-      s.onerror = () => { delete waiting[name]; res(false); };
-      s.onload = () => { s.remove(); if (waiting[name]) { delete waiting[name]; res(!!pack[name]); } };
-      document.head.appendChild(s);
+      lanes[lane !== undefined ? lane : isSfxClip(name) ? 0 : 1].push(() => new Promise((done) => {
+        if (pack[name]) { settle(name, true); done(); return; }
+        const s = document.createElement('script');
+        s.src = 'audio/clips/' + encodeURIComponent(name) + '.js';
+        s.onerror = () => { settle(name, false); done(); };
+        s.onload = () => { s.remove(); settle(name, !!pack[name]); done(); };
+        document.head.appendChild(s);
+      }));
+      pump();
     }).then((ok) => { delete loadingScripts[name]; return ok; });
     loadingScripts[name] = p;
     return p;
@@ -120,7 +141,15 @@
     // free last round's clips that are not needed now
     for (const n of Object.keys(pack)) if (!want.has(n)) delete pack[n];
     for (const n of Object.keys(buffers)) if (!want.has(n) && !(buffers[n] instanceof Promise)) delete buffers[n];
-    return A.loadMany([...want], onProgress);
+    // effects first: the promise also carries .effects, which resolves when they alone are in
+    const list = [...want], total = list.length || 1;
+    let done = 0;
+    const one = (n, lane) => A.load(n, lane).then(() => { done++; if (onProgress) onProgress(done / total); });
+    const effects = Promise.all(list.filter(isSfxClip).map(n => one(n, 0)));
+    const voices = Promise.all(list.filter(n => !isSfxClip(n)).map(n => one(n, 1)));
+    const all = Promise.all([effects, voices]).then(() => list.length);
+    all.effects = effects;
+    return all;
   };
   A.roundSelection = () => roundSel;
   // menus: make sure the menu/intro/quit events have something loaded
@@ -196,7 +225,7 @@
       else playBuffer(b, vol, 1, tag);
     };
     if (pack[name] || buffers[name]) go();
-    else A.load(name).then(ok => { if (ok && (late || performance.now() - t0 < 400)) go(); });
+    else A.load(name, 0).then(ok => { if (ok && (late || performance.now() - t0 < 400)) go(); });
   };
   A.stopTag = function (tag) { for (const s of playing.slice()) if (s._tag === tag) { try { s.stop(); } catch (e) {} } };
   // menu preview: stops the previous preview first

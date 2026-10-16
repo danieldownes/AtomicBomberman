@@ -432,26 +432,51 @@
   // between rounds: pick and load this round's sounds (each round gets a different handful)
   SC.register('glue', {
     enter(a) {
-      this.a = a; this.t = 0; this.n = Math.floor(Math.random() * AB.val(16, 7)); this.prog = 0; this.done = false; this.img = false;
-      A.newRound((f) => { this.prog = f; }).then(() => { this.done = true; });
-      G.preloadImages(a.level !== undefined ? ['field' + a.level] : []).then(() => { this.img = true; });
-      this.readySent = false;
+      this.a = a; this.t = 0; this.prog = 0; this.readySent = false; this.extraT = 0;
+      // one of the loading pictures that's already here (glue0 comes with the start-up)
+      const nG = AB.val(16, 7), have = [];
+      for (let i = 0; i < nG; i++) if (G.isLoaded('glue' + i)) have.push(i);
+      this.n = have.length ? have[Math.floor(Math.random() * have.length)] : 0;
+      // needed before the round can start: the arena picture (high priority) and the sound effects;
+      // the voices get a few more seconds, then go on loading during the round
+      this.img = a.level === undefined; this.fx = false; this.all = false;
+      const field = a.level !== undefined ? G.loadImage('field' + a.level, { priority: 'high', retries: 3 }) : Promise.resolve(true);
+      field.then(() => { this.img = true; });
+      const snd = A.newRound((f) => { this.prog = f; });
+      snd.effects.then(() => { this.fx = true; });
+      snd.then(() => { this.all = true; });
+      // then, quietly: the pictures the next screens show
+      Promise.all([field, snd.effects]).then(() => {
+        const M = AB.match, S = (M && M.S) || AB.settings, list = ['results', 'draw', 'winz'];
+        if (M && M.players) for (const p of M.players) list.push('victory' + p.color);
+        if (S.teamPlay) list.push('team0', 'team1');
+        if (S.goldBomberman) list.push('roulette');
+        for (let i = 0; i < nG; i++) list.push('glue' + i);
+        G.prefetch(list);
+      });
     },
-    // go on once the sounds and the arena picture are in (or after 8 s on a slow connection);
-    // a network round then waits until the host says every computer is ready
+    // go on once the picture and the effects are in, plus up to 6 s for the voices (90 s at most, so a
+    // dead connection can't hang the game); a network round then waits until the host says go
     tick() {
-      const loaded = ++this.t > 40 && ((this.done && this.img) || this.t > AB.TPS * 8);
+      this.t++;
+      const must = this.img && this.fx;
+      if (must && !this.all) this.extraT++;
+      const loaded = this.t > 40 && ((must && (this.all || this.extraT > AB.TPS * 6)) || this.t > AB.TPS * 90);
       if (!this.a.net) { if (loaded) this.a.then(); return; }
       if (loaded && !this.readySent) { this.readySent = true; AB.netmatch.ready(this.a.net); }
       if (this.readySent && AB.netmatch.goRound === this.a.net) this.a.then();
     },
     render(ctx) {
-      glue(ctx, this.n); centerText(ctx, this.readySent ? 'Waiting for the other computers...' : AB.msg(201, 'Loading data...'), 232, WHITE);
-      if (!this.done && this.t > 20) { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(220, 256, 200, 6); ctx.fillStyle = YELLOW; ctx.fillRect(220, 256, 200 * this.prog, 6); }
+      glue(ctx, this.n);
+      let txt = AB.msg(201, 'Loading data...');
+      if (this.readySent) { const w = AB.netmatch.waitingFor ? AB.netmatch.waitingFor() : []; txt = w.length ? 'Waiting for ' + w.join(', ') + '...' : 'Waiting for the other computers...'; }
+      else if (this.t > AB.TPS * 3 && !this.img) txt = 'Loading the arena...';
+      centerText(ctx, txt, 232, WHITE);
+      const prog = ((this.img ? 1 : 0) + this.prog * 3) / 4;
+      if (!this.readySent && prog < 1 && this.t > 20) { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(220, 256, 200, 6); ctx.fillStyle = YELLOW; ctx.fillRect(220, 256, 200 * prog, 6); }
     },
   });
 
-  // ================================================================= GAME
   SC.register('game', {
     help: 'manual',
     enter(arg) {
