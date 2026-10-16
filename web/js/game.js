@@ -82,6 +82,9 @@
       this.timeLeft = this.S.playTime > 0 ? this.S.playTime * AB.TPS : -1;
       this.hurry = false; this.hurryShown = 0;
       this.enc = null;               // enclosement spiral state
+      // round-start countdown (3, 2, 1) with the arena's name: nothing moves until it's over
+      // (S.countdown is set by the match screens from the Options setting; a bare Game doesn't count down)
+      this.startDelay = this.S.countdown === true && !(cfg.match && cfg.match.demo) ? 3 * AB.TPS : 0;
       this.state = 'play';            // play | ending | over
       this.endTimer = 0;
       this.result = null;
@@ -240,6 +243,16 @@
       this.events.length = 0;
       if (this.state === 'over' && this.result && this.result.forced) return;
       this.tick++;
+      if (this.startDelay > 0) {
+        // counting down: inputs are ignored and nothing moves (the same on every computer)
+        if (--this.startDelay === 0) this.ev({ t: 'go' });
+        this.players.forEach((p, i) => {
+          // a forfeit (network F10) still counts
+          if (inputs && (inputs[i] & AB.IN.FORFEIT) && !p.isAI && p.alive) { this.killPlayer(p, -1, true); this.ev({ t: 'forfeit', slot: p.slot }); }
+          p.inBits = 0; p.prevIn = 0;
+        });
+        return;
+      }
       // AI players compute their own input deterministically inside the simulation
       for (let i = 0; i < this.players.length; i++) {
         const p = this.players[i];

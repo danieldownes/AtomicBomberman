@@ -479,6 +479,7 @@
     },
     render(ctx) {
       glue(ctx, this.n);
+      if (this.a.level !== undefined) G.titleText(ctx, AB.levelName(this.a.level), 320, 180, 56, 560);
       let txt = AB.msg(201, 'Loading data...');
       if (this.readySent) { const w = AB.netmatch.waitingFor ? AB.netmatch.waitingFor() : []; txt = w.length ? 'Waiting for ' + w.join(', ') + '...' : 'Waiting for the other computers...'; }
       else if (this.t > AB.TPS * 3 && !this.img) txt = 'Loading the arena...';
@@ -499,6 +500,7 @@
       if (M.demo) { S.playTime = 90; S.arenas = {}; }
       // network round: the host decided arena, seed and settings (js/netscreens.js)
       const net = this.net = arg.net || null;
+      S.countdown = AB.settings.countdown !== false;          // Options > Round Start Countdown
       if (net) Object.assign(S, net.sim);
       // pick an arena: a campaign stage names one, otherwise one of the ticked arenas
       let level = net ? net.level : arg.level !== undefined ? arg.level : AB.testLevel !== undefined ? AB.testLevel : AB.pickArena(S);
@@ -549,6 +551,7 @@
       this.t++;
       if (this.t === 30 && !AB.match.demo) A.playRange(9000, 9000);    // round-start announcer (unused CD lines)
       if (this.forfeitAsk > 0) this.forfeitAsk--;
+      { const n = g.startDelay > 0 ? Math.ceil(g.startDelay / AB.TPS) : 0; if (n !== this.lastCount) { if (n > 0) A.play(1300); this.lastCount = n; } }
       if (this.session) {
         // lockstep: advance only when every computer's input for the next tick is here. Inputs are
         // always queued `delay` ticks ahead, so only a queue clearly longer than that means this
@@ -612,6 +615,12 @@
         G.text(ctx, txt, 515, 28, ai + gh + ro ? WHITE : '#60f060', 'font0', 2);
       }
       if (M && M.demo && blink()) { panel(ctx, 230, 450, 180, 24, 0.7); centerText(ctx, 'DEMO - press any key', 454, YELLOW, 'font0'); }
+      // round start: the arena's name and a 3, 2, 1 countdown
+      if (this.g.startDelay > 0) {
+        const g = this.g, n = Math.ceil(g.startDelay / AB.TPS), frac = (g.startDelay % AB.TPS) / AB.TPS;
+        G.titleText(ctx, AB.levelName(g.level), 320, 200, 52, 560);
+        G.titleText(ctx, String(n), 320, 322, 76 + Math.round(30 * frac), 200, 0.8 + 0.2 * frac);
+      }
       if (this.session && this.stallT > 20) {
         const who = this.session.missing().map(i => this.g.players[i] && this.g.players[i].name).filter(Boolean);
         panel(ctx, 140, 220, 360, 44, 0.85);
@@ -825,6 +834,7 @@
         { label: `Screen Scaling: ${S.smoothScaling ? 'Smooth' : 'Sharp pixels'}`, change: () => { S.smoothScaling = !S.smoothScaling; AB.applyDisplay(); } },
         { label: `Idle Animations: ${S.idleAnims !== false ? 'On (unused CD animations)' : 'Off'}`, change: () => { S.idleAnims = S.idleAnims === false; } },
         { label: `Intro Movie on Start: ${yesno(S.playIntro !== false)}`, change: () => { S.playIntro = S.playIntro === false; } },
+        { label: `Round Start Countdown: ${yesno(S.countdown !== false)}`, change: () => { S.countdown = S.countdown === false; } },
         { label: `Music Volume: ${Math.round(S.musicVolume * 10)}`, change: (d) => { S.musicVolume = AB.clamp(Math.round(S.musicVolume * 10 + d) / 10, 0, 1); A.setVolumes(S.musicVolume, S.sfxVolume); } },
         { label: `Sound Effects Volume: ${Math.round(S.sfxVolume * 10)}`, change: (d) => { S.sfxVolume = AB.clamp(Math.round(S.sfxVolume * 10 + d) / 10, 0, 1); A.setVolumes(S.musicVolume, S.sfxVolume); A.playRange(400, 499); } },
         { label: AB.msg(265, 'Define keyboard layouts'), action: () => SC.go('keys') },

@@ -31,6 +31,7 @@
     const bar = document.querySelector('#bar > div'), msg = document.getElementById('lmsg');
     msg.textContent = 'Preparing graphics...';
     await AB.gfx.load((f) => { bar.style.width = Math.round(70 + f * 22) + '%'; });
+    await AB.gfx.loadTitleFont();
     msg.textContent = 'Loading pictures...';
     await AB.gfx.preloadImages(['title', 'mainmenu_port', 'glue0', 'iplogo', 'hslogo']);
     // while the menus are up, fetch the loading pictures and the end-of-round screens in the background

@@ -151,7 +151,11 @@
         if (c === '#') { ctx.fillStyle = '#9a9aa8'; ctx.fillRect(px + xx * cw + 1, py + yy * ch + 1, cw - 2, ch - 2); }
         else if (c === ':') { ctx.fillStyle = sc.density < 100 ? 'rgba(176,112,48,0.75)' : '#b07030'; ctx.fillRect(px + xx * cw + 2, py + yy * ch + 2, cw - 4, ch - 4); }
       }
-      for (const st of sc.starts || []) U.miniHead(ctx, st.p, px + st.x * cw - 1, py + st.y * ch - 2);
+      // start positions: the head icon (22 x 19, drawn from its top centre) shrunk to fit a cell, centred in it
+      for (const st of sc.starts || []) {
+        ctx.save(); ctx.translate(px + st.x * cw + cw / 2, py + st.y * ch + ch / 2); ctx.scale(0.62, 0.62);
+        U.miniHead(ctx, st.p, 0, -7.5); ctx.restore();
+      }
       ctx.strokeStyle = 'rgba(248,216,72,0.6)'; ctx.strokeRect(px - 0.5, py - 0.5, 15 * cw + 1, 11 * ch + 1);
       const f = AB.schemeFit(cur);
       let ty = py + 11 * ch + 10;

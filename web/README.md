@@ -161,6 +161,11 @@ These are under main menu > Options, next to the original settings.
   eating an apple, blowing on his knuckles). One plays when a player stands still for five
   seconds.
 * **Intro Movie on Start**: plays the CD's intro movie before the title screen.
+* **Round Start Countdown** (on by default): each round opens with the arena's name and a 3, 2, 1
+  countdown before anyone can move. The loading screen shows the arena's name too.
+  * The lettering copies the style of the original's HURRY!! picture. The CD has no letters in that
+    style, so it uses Anton, a free font (SIL Open Font License) embedded in `data/titlefont.js`.
+  * In network games the host's setting applies.
 * **Graphics**
   * *Enhanced*: soft sprite edges, translucent shadows and glowing flames. These are derived
     when the game loads.
@@ -189,6 +194,7 @@ data/classic.js     the Classic arena's tiles, bombs and flames (new art)
 data/campaigns.js   the campaign stages from DATA/RES/*.CAM
 data/sounds.js      sound catalog: game events -> phrases -> takes, with flags for each take
 data/fonts.js       FONT0/1/6.FON
+data/titlefont.js   the Anton font (OFL, licence in data/titlefont.LICENSE.txt) for arena names and the countdown
 img/                every .PCX picture as PNG, mainmenu_port.png (relabelled menu), field11.png (Classic)
 audio/music/        the 17 music tracks, plus classic.mp3 (new)
 audio/clips/        all 2,010 sound clips from the CD, one small script each, loaded when needed

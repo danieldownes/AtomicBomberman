@@ -428,7 +428,8 @@
     const sim = {};
     for (const k of ['conveyorSpeed', 'diseasesDestroyable', 'enclosement', 'playTime', 'randomStart', 'stompedDetonate',
                      'winsNeeded', 'winByKills', 'lostNetToAI', 'scheme']) sim[k] = S[k];
-    sim.scheme = AB.pickScheme(S);      // one of the host's ticked schemes for this round
+    sim.scheme = AB.pickScheme(S);
+    sim.countdown = S.countdown !== false;      // one of the host's ticked schemes for this round
     sim.teamPlay = false; sim.goldBomberman = false;
     sim.aiFinale = true;           // only computer players left: fast walls (js/game.js updateAIFinale)
     return { round, seed: (Math.random() * 0xffffffff) >>> 0, level: AB.pickArena(S), sim, players, delay, aiLevel: room.aiLevel };

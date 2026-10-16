@@ -236,6 +236,36 @@
     if (im.complete && im.naturalWidth) ctx.drawImage(im, x, y);
   };
 
+  // ---- title text in the style of the original's HURRY!! picture ----
+  // The CD has no letters in that style (HURRY.ANI is one picture of the word), so arena names and the
+  // round-start countdown are drawn with Anton, a free condensed font embedded in data/titlefont.js:
+  // slanted, hollow, a yellow line between two thin black ones, like HURRY!!
+  let titleFont = 'bold 40px Impact, "Arial Narrow", sans-serif';
+  gfx.loadTitleFont = async function () {
+    if (!window.AB_TITLEFONT || !window.FontFace) return;
+    try {
+      const bin = atob(window.AB_TITLEFONT), buf = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      const f = new FontFace('ABTitle', buf.buffer);
+      await f.load(); document.fonts.add(f);
+      titleFont = '40px ABTitle';
+    } catch (e) { console.warn('title font:', e.message); }
+  };
+  // x: centre, y: baseline; size: cap height in px; maxW shrinks long text to fit
+  gfx.titleText = function (ctx, text, x, y, size, maxW = 600, alpha = 1) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = titleFont.replace('40px', size + 'px');
+    let w = ctx.measureText(text).width;
+    const sx = w > maxW ? maxW / w : 1;
+    ctx.translate(x, y); ctx.transform(sx, 0, -0.22, 1, 0, 0);       // squeeze to fit, slant like HURRY!!
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic'; ctx.lineJoin = 'round';
+    ctx.fillStyle = 'rgba(0,0,0,0.30)'; ctx.fillText(text, 0, 0);      // a little darkening inside, for legibility
+    ctx.strokeStyle = '#000'; ctx.lineWidth = Math.max(4, size / 9); ctx.strokeText(text, 0, 0);
+    ctx.strokeStyle = '#f8e030'; ctx.lineWidth = Math.max(2, size / 22); ctx.strokeText(text, 0, 0);
+    ctx.restore();
+  };
+
   // ---- bitmap fonts (FONT0/1/6.FON) ----
   const F = window.AB_FONTS;
   const fontCache = {};
