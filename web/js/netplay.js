@@ -33,12 +33,14 @@
   const STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
   // what the ICE servers are, for the lobby's status line: 'direct' (STUN only), 'relay', 'relay failed'
   NP.relay = 'direct';
-  let ice = STUN;
-  // a TURN provider's credentials endpoint (Metered: https://<app>.metered.live/api/v1/turn/credentials?apiKey=...)
+  let ice = STUN, iceAt = 0, iceP = null;
+  // a TURN credentials endpoint: your Cloudflare Worker (cloudflare/turn-worker.js), which answers
+  // {iceServers: [...]}, or Metered's https://<app>.metered.live/api/v1/turn/credentials?apiKey=...
   async function fetchTurn(url) {
     const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 6000);
     try {
-      const r = await fetch(url, { signal: ctl.signal });
+      const r = await fetch(url, { signal: ctl.signal, cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
       const list = Array.isArray(j) ? j : j.iceServers;
       if (!Array.isArray(list) || !list.length) throw new Error('no servers');
@@ -51,10 +53,23 @@
     ice = C.iceServers || STUN;
     NP.relay = ice.some(s => [].concat(s.urls).some(u => /^turns?:/.test(u))) ? 'relay' : 'direct';
     if (C.turnCredentialsUrl) {
-      try { ice = ice.concat(await fetchTurn(C.turnCredentialsUrl)); NP.relay = 'relay'; }
+      try { ice = ice.concat(await fetchTurn(C.turnCredentialsUrl)); NP.relay = 'relay'; iceAt = now(); }
       catch (e) { console.warn('TURN credentials:', e.message); if (NP.relay !== 'relay') NP.relay = 'relay failed'; }
     }
   }
+  // ?ice=relay sends everything through the relay (to check it works: two tabs then connect only through it)
+  const rtcConfig = () => {
+    const q = AB.params || new URLSearchParams(location.search);
+    return q.get('ice') === 'relay' ? { iceServers: ice, iceTransportPolicy: 'relay' } : { iceServers: ice };
+  };
+  // fetched relay logins last a day: when the lobby opens with ones over an hour old (or none, after a
+  // failure), get fresh ones; the lobby's connection uses them from its next connection on
+  NP.refreshIce = function () {
+    const C = window.AB_NET_CONFIG || {};
+    if (!C.turnCredentialsUrl || (NP.relay === 'relay' && now() - iceAt < 3600e3)) return Promise.resolve();
+    if (!iceP) iceP = resolveIce().finally(() => { iceP = null; if (L.peer && !L.peer.destroyed) L.peer.options.config = rtcConfig(); });
+    return iceP;
+  };
   // js/netconfig.js holds optional server settings (empty by default); PeerJS loads only when it's needed
   NP.loadLib = function () {
     if (window.Peer && libP) return libP;
@@ -70,7 +85,7 @@
     if (C.peer) Object.assign(o, C.peer);
     const ps = q.get('peerserver');
     if (ps) { const [host, port] = ps.split(':'); Object.assign(o, { host, port: +(port || 9000), path: '/', secure: false }); }
-    o.config = { iceServers: ice };
+    o.config = rtcConfig();
     return o;
   }
   const makePeer = (id) => (id ? new window.Peer(id, peerOptions()) : new window.Peer(peerOptions()));
@@ -81,9 +96,9 @@
   for (let n = 1; n <= NP.ROOMS; n++) L.rooms.push({ n, state: 'checking', info: null, conn: null, t: 0 });
   let lobbyTimer = null;
   NP.enterLobby = async function () {
-    if (L.status === 'online' && L.peer && !L.peer.destroyed) { startProbing(); return; }
+    if (L.status === 'online' && L.peer && !L.peer.destroyed) { NP.refreshIce(); startProbing(); return; }
     L.status = 'connecting'; L.error = '';
-    try { await NP.loadLib(); } catch (e) { L.status = 'error'; L.error = e.message; return; }
+    try { await NP.loadLib(); await NP.refreshIce(); } catch (e) { L.status = 'error'; L.error = e.message; return; }
     if (L.peer) try { L.peer.destroy(); } catch (e) {}
     const peer = L.peer = makePeer();
     peer.on('open', () => { L.status = 'online'; startProbing(); });

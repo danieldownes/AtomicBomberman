@@ -3,13 +3,15 @@
 // By default the game uses free public services with no account:
 //   - PeerJS's server (0.peerjs.com) introduces the browsers to each other,
 //   - Google and Cloudflare STUN servers find a direct route through home routers.
-// That is enough for most home connections. Some strict networks (mobile data, offices, schools)
-// also need a TURN relay to carry the game; set one up below.
+// That is enough for many connections. Some networks block direct links (some mobile, office, school
+// and guest networks, and some PCs' firewalls), so a TURN relay has to carry the game; set one up here.
 //
-// Free relay: Metered's Open Relay (metered.ca/tools/openrelay) gives 20 GB of TURN a month on a free
-// account. Sign up, then paste your app name and API key into the URL below. Anyone can read this
-// file, so anyone could use that allowance. Only computers that can't link directly use the relay,
-// at about 70 MB per hour of play each, so 20 GB is roughly 300 hours of relayed play a month.
+// Recommended relay: Cloudflare Realtime TURN (1,000 GB a month free) through your own small Worker,
+// which keeps the API token secret. Setup: cloudflare/README.md. Then put the Worker's address here:
+//   window.AB_NET_CONFIG = { turnCredentialsUrl: 'https://atomic-bomberman-turn.YOUR-SUBDOMAIN.workers.dev/' };
+//
+// Or Metered's Open Relay (20 GB a month free, metered.ca/tools/openrelay). Its key sits in this public
+// file, so anyone could use that allowance:
 //   window.AB_NET_CONFIG = { turnCredentialsUrl: 'https://YOUR-APP.metered.live/api/v1/turn/credentials?apiKey=YOUR-KEY' };
 //
 // Or list relay servers yourself (static credentials, coturn...):
@@ -21,6 +23,6 @@
 // Your own PeerServer (npx peer --port 9000). Every computer in a room must use the same one:
 //   window.AB_NET_CONFIG = { peer: { host: 'peer.example.com', port: 443, path: '/', secure: true } };
 //
-// These can be combined in one object. A page URL with ?peerserver=host:port (plain http) or
-// ?ice=none overrides this.
+// These can be combined in one object. Page address overrides: ?peerserver=host:port (plain http),
+// ?ice=none (no STUN/TURN), ?ice=relay (relay only, to check the relay works).
 window.AB_NET_CONFIG = window.AB_NET_CONFIG || null;

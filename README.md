@@ -51,6 +51,7 @@ To turn on the workflow: on GitHub go to Settings > Pages > Build and deployment
 ```
 web/          the game (see web/README.md for controls, options and how it works)
 .github/      pages.yml: deploys web/ to GitHub Pages with the version stamped in
+cloudflare/   an optional Cloudflare Worker that gives network players a relay (see cloudflare/README.md)
 tools/        the scripts that convert the CD into web/ (see tools/README.md)
 decompiled/   pseudo-C of BM95.EXE, used as the reference for the game logic
 ```

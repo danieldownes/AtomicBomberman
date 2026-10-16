@@ -58,15 +58,20 @@ needs no server of its own, so it works from GitHub Pages as it is.
   WebRTC data channels.
 * **STUN** (free, no account): Google's and Cloudflare's public STUN servers tell each browser its
   public address, so most home connections can link directly.
-* **TURN relay** (optional): some strict networks, such as mobile data, offices and schools, can't
-  link directly, so a relay has to carry the game. None is set up by default:
+* **TURN relay** (optional): some networks can't link directly, so a relay has to carry the game.
+  Examples are some mobile, office, school and guest networks, and a PC whose firewall treats its
+  network as public. None is set up by default:
   * PeerJS's own free TURN hosts (`eu-0`/`us-0.turn.peerjs.com`) no longer exist. They had no DNS
     records when tested in October 2026, so the port doesn't use them.
-  * The free option is Metered's [Open Relay](https://www.metered.ca/tools/openrelay/): 20 GB a
-    month on a free account. Put your credentials URL in `js/netconfig.js` (see below). The lobby
-    then says "relay ready".
-  * A relayed computer uses about 70 MB per hour of play (about 9 KB/s each way). Only computers
-    that can't link directly use the relay.
+  * **Recommended: Cloudflare Realtime TURN.** It's free for the first 1,000 GB a month (shared
+    with Cloudflare's SFU), then $0.05/GB. Its API token must stay secret, so a small Cloudflare
+    Worker (`cloudflare/turn-worker.js`) hands the game 24-hour logins instead. The game stays on
+    GitHub Pages. Setup is in `cloudflare/README.md`.
+  * Or Metered's [Open Relay](https://www.metered.ca/tools/openrelay/): 20 GB a month on a free
+    account, with its key in the public `js/netconfig.js`.
+  * Once a relay is set up, the lobby says "relay ready".
+  * A relayed computer uses about 70 MB per hour of play (about 9 KB/s each way). Only computers that
+    can't link directly use the relay.
 
 Checked from a home connection in October 2026: the PeerJS server answered in about 3 seconds, and two
 browsers on one machine connected in under a second. These are shared community services with no
@@ -144,7 +149,19 @@ checks that both end with the same checksum.
 
 Edit `js/netconfig.js`. It ships empty, and the file has examples.
 
-**Free relay (Metered Open Relay).** Sign up at metered.ca and create an app. Then set:
+**Cloudflare relay.** After following `cloudflare/README.md`, set:
+
+```js
+window.AB_NET_CONFIG = { turnCredentialsUrl: 'https://atomic-bomberman-turn.YOUR-SUBDOMAIN.workers.dev/' };
+```
+
+* The Worker only answers pages on `danieldownes.github.io`, `localhost`/`127.0.0.1` and copies
+  opened from disk. Edit `ALLOWED_ORIGINS` in the Worker for a fork.
+* That check only stops other websites. A script could still ask the Worker for logins, so keep an
+  eye on the usage in Cloudflare's dashboard.
+* Logins last 24 hours. The lobby fetches fresh ones whenever it opens with ones over an hour old.
+
+**Metered relay.** Sign up at metered.ca and create an app. Then set:
 
 ```js
 window.AB_NET_CONFIG = {
@@ -169,13 +186,14 @@ window.AB_NET_CONFIG = {
 
 * A PeerServer is `npx peer --port 9000` (the `peer` npm package). Every computer in a room must use
   the same one.
-* You can also run your own TURN server with coturn. Cloudflare's TURN service needs credentials
-  minted server-side, so it doesn't suit a static site on its own.
+* You can also run your own TURN server with coturn.
 
 URL overrides, mainly for testing:
 
 * `?peerserver=127.0.0.1:9000` uses a PeerServer over plain http.
 * `?ice=none` uses no STUN/TURN, which is enough on one machine or a LAN.
+* `?ice=relay` sends everything through the relay. Two tabs with it can only connect through the
+  relay, so this checks that the relay works.
 
 **Local test.** Run `npx peer --port 9000 --host 127.0.0.1`, serve this folder, and open two browser
 profiles (or one normal and one private window) at
