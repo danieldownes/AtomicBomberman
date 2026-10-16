@@ -173,6 +173,7 @@
         prevIn: 0, inBits: 0,
         idleT: 0, idleN: pc.slot | 0,       // standing-still timer for the idle animations (cosmetic)
         kills: 0, awesomeCount: 0, tramp: null, warp: null,
+        warpLock: -1,                       // the warp just arrived at: it can't send you on until you've left its tile
         ai: pc.ai ? { plan: null, t: 0 } : null,
         isAI: !!pc.ai,
         aiLevel: pc.aiLevel || 'hard',      // computer skill: 'easy', 'medium' or 'hard' (the original AI)
@@ -435,9 +436,10 @@
       const perp = DX[dir] * oy - DY[dir] * ox;
       const cx = AB.cellX(p.x), cy = AB.cellY(p.y);
       const ax = cx + DX[dir], ay = cy + DY[dir];
+      if (p.warpLock >= 0 && p.warpLock !== idx(cx, cy)) p.warpLock = -1;
       if (along === -1 && !conveyor) {
         const e = this.extras[idx(cx, cy)];
-        if (e && e.t === 'warp') { this.startWarp(p, e); return true; }
+        if (e && e.t === 'warp' && p.warpLock !== idx(cx, cy)) { this.startWarp(p, e); return true; }
         if (e && e.t === 'trampoline') { this.startTrampoline(p); return true; }
       }
       if (along === 0 && p.pw[PW.KICK] && !conveyor) {
@@ -482,7 +484,7 @@
       if (p.special === 6 && p.specialT > K.WARP) {
         const d = p.warp.dest;
         p.x = AB.cellCenterX(d % COLS); p.y = AB.cellCenterY((d / COLS) | 0);
-        p.special = 7; p.specialT = 0;
+        p.special = 7; p.specialT = 0; p.warpLock = d;
         // step off the destination warp so we don't bounce back immediately
         for (let k = 0; k < 4; k++) {
           const dd = (p.dir + k) & 3;
@@ -1109,7 +1111,7 @@
       const mix = (v) => { h ^= (v | 0); h = Math.imul(h, 16777619) >>> 0; };
       mix(this.tick); mix(this.rng.s); if (this.enc) { mix(this.enc.x); mix(this.enc.y); mix(this.enc.ring); mix(this.enc.fast ? 1 : 0); }
       for (const p of this.players) {
-        mix(p.x); mix(p.y); mix(p.alive ? 1 : 0); mix(p.special); mix(p.disT); mix(p.held);
+        mix(p.x); mix(p.y); mix(p.alive ? 1 : 0); mix(p.special); mix(p.disT); mix(p.held); mix(p.warpLock);
         for (const v of p.pw) mix(v);
         for (let d = 0; d < AB.DIS_COUNT; d++) mix(p.dis[d] ? d + 1 : 0);
       }

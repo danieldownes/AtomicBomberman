@@ -152,12 +152,34 @@
   };
 
   // draw state `i` of a sequence; offsets from the .ANI STAT/FRAM records are applied when useOff.
+  // The frames themselves are already aligned (every frame of a file shares one canvas and hotspot), and
+  // the small per-state offsets on top only make the body wobble a pixel or two: with them, the feet of
+  // the death and idle animations drift 1-3 px from state to state, without them they stay put. So a
+  // sequence is drawn with its usual offset (the most common one) for every state, which keeps it lined
+  // up with the other sequences, and parts of a multi-part state keep their offsets relative to the first.
+  // Only the bomberman animations are drawn this way: the flames' offsets are positional and stay.
+  const baseOff = new WeakMap();
+  function seqBase(states) {
+    let b = baseOff.get(states);
+    if (!b) {
+      const n = {};
+      let best = '0,0', bn = 0;
+      for (const st of states) { if (!st.length) continue; const k = st[1] + ',' + st[2]; n[k] = (n[k] || 0) + 1; if (n[k] > bn) { bn = n[k]; best = k; } }
+      b = best.split(',').map(Number);
+      baseOff.set(states, b);
+    }
+    return b;
+  }
   gfx.draw = function (ctx, seqName, i, x, y, color, useOff = true) {
     const s = typeof seqName === 'string' ? seqIndex[seqName] : seqName;
     if (!s || !s.states.length) return;
     const st = s.states[((i % s.states.length) + s.states.length) % s.states.length];
+    if (!st.length) return;
+    // useOff 'steady' (the bomberman animations): one offset for the whole sequence; true: per state
+    const b = useOff === 'steady' ? seqBase(s.states) : [st[1], st[2]];
     for (let k = 0; k < st.length; k += 3) {
-      gfx.frame(ctx, s.ani, st[k], x + (useOff ? st[k + 1] : 0), y + (useOff ? st[k + 2] : 0), color);
+      const ox = useOff ? b[0] + st[k + 1] - st[1] : 0, oy = useOff ? b[1] + st[k + 2] - st[2] : 0;
+      gfx.frame(ctx, s.ani, st[k], x + ox, y + oy, color);
     }
   };
 

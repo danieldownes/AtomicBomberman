@@ -107,15 +107,15 @@
   }
   // classic players: only walk, stand and death exist, so the special moves show the standing pose
   function drawClassicPlayer(ctx, g, p, t, color, dn) {
-    if (!p.alive) { G.draw(ctx, 'classic death', Math.min(10, Math.floor(p.dieT / (AB.TPR * 3))), p.x, p.y + 17 + p.dieY, color, true); return; }
+    if (!p.alive) { G.draw(ctx, 'classic death', Math.min(10, Math.floor(p.dieT / (AB.TPR * 3))), p.x, p.y + 17 + p.dieY, color, 'steady'); return; }
     let y = p.y + 17;
     if (p.tramp) { G.draw(ctx, 'shadow', 0, p.x, p.y + 14, -1, false); y -= p.tramp.h; }
     const sp = p.special;
     let d = dn, jx = 0;
     if (sp === 6 || sp === 7) d = AB.DIRNAME[(Math.floor(p.specialT / 3)) & 3];
     if (sp === 3 || sp >= 20) jx = (t >> 1) % 2 ? 1 : -1;
-    if (p.moving && !sp) G.draw(ctx, 'classic walk ' + d, [0, 1, 0, 2][Math.floor(p.walkPix / 6) % 4], p.x, y, color, true);
-    else G.draw(ctx, 'classic stand ' + d, 0, p.x + jx, y, color, true);
+    if (p.moving && !sp) G.draw(ctx, 'classic walk ' + d, [0, 1, 0, 2][Math.floor(p.walkPix / 6) % 4], p.x, y, color, 'steady');
+    else G.draw(ctx, 'classic stand ' + d, 0, p.x + jx, y, color, 'steady');
     if (p.held >= 0) { const b = g.bombs[p.held]; if (b && !b.dead) drawHeldBomb(ctx, b, p.x, y - 52); }
   }
 
@@ -129,7 +129,7 @@
       const name = 'die green ' + p.dieAnim;
       const n = G.seqLen(name) || 40;
       const st = Math.min(n - 1, Math.floor(p.dieT / AB.TPR));
-      G.draw(ctx, name, st, p.x, p.y + p.dieY, color, true);
+      G.draw(ctx, name, st, p.x, p.y + p.dieY, color, 'steady');
       return;
     }
     if (p.dis[AB.DIS.INVISIBLE] && (t % 90) > 6) return;
@@ -139,12 +139,12 @@
       y -= p.tramp.h;
     }
     const sp = p.special;
-    if (sp === 6 || sp === 7) { G.draw(ctx, 'spin', Math.floor(p.specialT / 2), p.x, y, color, true); return; }
-    if (sp >= 20) { G.draw(ctx, 'cornerhead ' + (sp - 20), Math.floor(p.specialT / AB.TPR), p.x, y, color, true); return; }
-    if (sp === 1) { G.draw(ctx, 'kick ' + dn, Math.floor(p.specialT / AB.TPR), p.x, y, color, true); return; }
-    if (sp === 2) { G.draw(ctx, 'punch ' + dn, Math.floor(p.specialT / AB.TPR) + 1, p.x, y, color, true); return; }
+    if (sp === 6 || sp === 7) { G.draw(ctx, 'spin', Math.floor(p.specialT / 2), p.x, y, color, 'steady'); return; }
+    if (sp >= 20) { G.draw(ctx, 'cornerhead ' + (sp - 20), Math.floor(p.specialT / AB.TPR), p.x, y, color, 'steady'); return; }
+    if (sp === 1) { G.draw(ctx, 'kick ' + dn, Math.floor(p.specialT / AB.TPR), p.x, y, color, 'steady'); return; }
+    if (sp === 2) { G.draw(ctx, 'punch ' + dn, Math.floor(p.specialT / AB.TPR) + 1, p.x, y, color, 'steady'); return; }
     if (sp === 4) {
-      G.draw(ctx, 'pickup ' + dn, Math.floor(p.specialT / AB.TPR), p.x, y, color, true);
+      G.draw(ctx, 'pickup ' + dn, Math.floor(p.specialT / AB.TPR), p.x, y, color, 'steady');
       // the bomb follows the pickup curve (VALUELST #500-#506: forward, height pairs)
       const b = g.bombs[p.held];
       if (b && !b.dead) {
@@ -155,23 +155,23 @@
       }
       return;
     }
-    if (sp === 3) { G.draw(ctx, 'stand ' + dn, 0, p.x + ((t >> 1) % 2 ? 1 : -1), y, color, true); return; }
+    if (sp === 3) { G.draw(ctx, 'stand ' + dn, 0, p.x + ((t >> 1) % 2 ? 1 : -1), y, color, 'steady'); return; }
     if (p.held >= 0) {
-      if (p.moving) G.draw(ctx, 'walkbomb ' + dn, Math.floor(p.walkPix / 3), p.x, y, color, true);
-      else G.draw(ctx, 'standbomb ' + dn, 0, p.x, y, color, true);
+      if (p.moving) G.draw(ctx, 'walkbomb ' + dn, Math.floor(p.walkPix / 3), p.x, y, color, 'steady');
+      else G.draw(ctx, 'standbomb ' + dn, 0, p.x, y, color, 'steady');
       const b = g.bombs[p.held];
       if (b && !b.dead) drawHeldBomb(ctx, b, p.x, y - 40 + (p.moving ? ((p.walkPix >> 2) % 2) : 0));
       return;
     }
-    if (p.moving) { G.draw(ctx, 'walk ' + dn, Math.floor(p.walkPix / 3), p.x, y, color, true); return; }
+    if (p.moving) { G.draw(ctx, 'walk ' + dn, Math.floor(p.walkPix / 3), p.x, y, color, 'steady'); return; }
     const idle = p.idleT - AB.IDLE_AFTER * AB.TPS;
     if (idle >= 0 && g.S.idleAnims !== false) {
       const a = AB.IDLE_ANIMS[p.idleN % AB.IDLE_ANIMS.length], seq = G.seqFrom(a.ani, a.seq);
       const st = Math.floor(idle / AB.TPR);
       // the idle .ANI files put the feet on the hotspot; the stand sequence draws them 19 px lower
-      if (seq && st < seq.states.length) { G.draw(ctx, seq, st, p.x + 2, y + 19, color, true); return; }
+      if (seq && st < seq.states.length) { G.draw(ctx, seq, st, p.x + 2, y + 19, color, 'steady'); return; }
     }
-    G.draw(ctx, 'stand ' + dn, 0, p.x, y, color, true);
+    G.draw(ctx, 'stand ' + dn, 0, p.x, y, color, 'steady');
   }
 
   function drawHeldBomb(ctx, b, x, yBottom) {
