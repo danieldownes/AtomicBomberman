@@ -26,13 +26,15 @@
     '   room joins it. A room that is playing opens again when its',
     '   match is over.',
     ' - Players here: Enter picks the keyboards and joysticks your',
-    '   computer brings, up to four.',
+    '   computer brings, up to four, and the colour of each player. If two',
+    '   players want the same colour, the one who joined first keeps it.',
     '',
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     'The room',
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     ' - Ping is the round trip from the host to each computer.',
-    ' - The host sets the number of computer players, opens Match',
+    ' - The host sets the number of computer players and their skill',
+    '   (Easy, Medium or Original, the AI of the original game), opens Match',
     '   settings (arenas, scheme, wins, play time and the gameplay',
     '   options) and starts the match (at least two players).',
     ' - Everyone in the room sees the settings change as the host picks',
@@ -47,7 +49,10 @@
     '   wait for it ("Waiting for ...").',
     ' - Keep the game in the front tab. Browsers slow down background',
     '   tabs, and that holds everyone up.',
-    ' - Pause and Force Draw are off.',
+    ' - Pause and Force Draw are off. F10 twice gives up the round for',
+    '   the players on your computer.',
+    ' - When only computer players are left, HURRY sounds, and 3 s later',
+    '   the walls close in four times as fast, all the way.',
     ' - If a computer leaves, its players carry on as computer',
     '   players ("Lost net players revert to AIs" in Options) or drop',
     '   out. If the host leaves, the room closes.',
@@ -93,7 +98,7 @@
     if (s && s.round === ev.r) { if (NM.transport.onmessage) NM.transport.onmessage(ev.m); }
     else if (!s || ev.r > s.round) NM.early.push(ev);
   };
-  NM.reset = function () { NM.session = null; NM.transport = null; NM.cfg = null; NM.pending = []; NM.early = []; if (AB.match && AB.match.net) AB.match = null; };
+  NM.reset = function () { NM.session = null; NM.transport = null; NM.cfg = null; NM.pending = []; NM.early = []; NM.goRound = 0; NM.myReady = 0; if (AB.match && AB.match.net) AB.match = null; };
   // a drop may arrive before this computer has started the round it belongs to: keep it until then
   NM.applyDrop = function (d) {
     if (NM.session && NM.session.round === d.round) NM.session.drop(d.slots, d.from);
@@ -111,6 +116,7 @@
   NM.start = function (cfg) {
     const me = NP.myId();
     const first = cfg.round === 1 || !AB.match || !AB.match.net;
+    if (cfg.round === 1) { NM.goRound = 0; NM.myReady = 0; }     // a new match: nothing carried over
     const S = Object.assign({}, AB.settings, cfg.sim);
     const M = AB.match = first ? { net: true, wins: {}, kills: {}, round: 0, players: [], demo: false } : AB.match;
     M.round = cfg.round; M.S = S; M.over = false;
@@ -159,11 +165,11 @@
     cfg.players.forEach((p, i) => { if (p.ai) return; if (p.owner === me) local.push(i); else remote.push(i); });
     const tr = NM.transport = { onmessage: null, send: (m) => NP.send({ t: 'ls', r: cfg.round, m }) };
     const s = new AB.net.LockstepSession(tr, g, {
-      localSlots: local, remoteSlots: remote, inputDelay: cfg.delay, readLocal: (i) => I.read(devices[i]),
+      localSlots: local, remoteSlots: remote, inputDelay: cfg.delay, readLocal: (i) => { const b = I.read(devices[i]); if (NM.forfeitSlots && NM.forfeitSlots.delete(i)) return b | AB.IN.FORFEIT; return b; },
       onDrop: (slots) => {
         for (const i of slots) {
           const p = g.players[i]; if (!p) continue;
-          if (cfg.sim.lostNetToAI) { p.isAI = true; p.ai = { plan: null, t: 0 }; }
+          if (cfg.sim.lostNetToAI) { p.isAI = true; p.ai = { plan: null, t: 0 }; p.aiLevel = cfg.aiLevel || 'hard'; }
           else if (p.alive) g.killPlayer(p, -1, true);
           const mp = AB.match.players[i]; if (mp) { mp.ai = true; mp.control = 'ai'; }
         }
@@ -196,6 +202,9 @@
     NP.send({ t: 'end' }); NM.reset(); if (NP.room) NP.room.inGame = false; NP.setState('waiting'); SC.go('room');
   };
   NM.quit = function () { NP.leave(); NM.reset(); SC.go('network'); };
+  // F10 (pressed twice) in a network round: this computer's players give up the round. It goes out as
+  // part of their next input, so every computer drops them at the same tick
+  NM.forfeitAll = function () { if (NM.session) NM.forfeitSlots = new Set(NM.session.localSlots); };
   // a round is being played right now (inputs flow): only then does silence from a computer mean it's gone
   NM.roundLive = () => !!NM.session && SC.name() === 'game';
 
@@ -263,7 +272,8 @@
         } else if (row.k === 'local') {
           G.text(ctx, 'Players here:', 74, y, sel ? YELLOW : WHITE, 'font1');
           const lp = NP.localControls();
-          lp.forEach((c, j) => U.miniHead(ctx, j, 210 + j * 20, y + 2));
+          const lc = NP.localColours();
+          lp.forEach((c, j) => U.miniHead(ctx, lc[j], 210 + j * 20, y + 2));
           G.text(ctx, lp.map(c => c.toUpperCase().replace(/(\D+)(\d)/, '$1 $2')).join(', '), 214 + lp.length * 20, y + 2, CYAN, 'font0');
           if (sel) G.text(ctx, 'Enter: change', 590, y + 2, GREY, 'font0', 2);
         } else if (row.k === 'back') {
@@ -301,20 +311,29 @@
     enter() {
       const cur = NP.localControls();
       this.list = [0, 1, 2, 3].map(i => cur[i] || 'off');
+      this.cols = NP.localColours().slice();
       this.sel = 0; this.err = null; this.errT = 0;
     },
     opts() { return SC.uiLate().controlOptions().filter(c => c !== 'ai'); },
+    // each player has a control row, and a colour row while it's on
+    rows() { const r = []; this.list.forEach((c, i) => { r.push({ k: 'ctl', i }); if (c !== 'off') r.push({ k: 'col', i }); }); return r; },
     key(k) {
-      const o = this.opts();
-      if (k.code === 'ArrowUp') { this.sel = (this.sel + 3) % 4; A.play(20); }
-      else if (k.code === 'ArrowDown') { this.sel = (this.sel + 1) % 4; A.play(21); }
-      else if (k.code === 'ArrowRight') { this.list[this.sel] = o[(o.indexOf(this.list[this.sel]) + 1) % o.length]; A.play(20); }
-      else if (k.code === 'ArrowLeft') { this.list[this.sel] = 'off'; A.play(21); }
+      const o = this.opts(), rows = this.rows();
+      this.sel = Math.min(this.sel, rows.length - 1);
+      const row = rows[this.sel];
+      if (k.code === 'ArrowUp') { this.sel = (this.sel + rows.length - 1) % rows.length; A.play(20); }
+      else if (k.code === 'ArrowDown') { this.sel = (this.sel + 1) % rows.length; A.play(21); }
+      else if (row.k === 'col' && (k.code === 'ArrowRight' || k.code === 'ArrowLeft')) { this.cols[row.i] = (this.cols[row.i] + (k.code === 'ArrowRight' ? 1 : 9)) % 10; A.play(20); }
+      else if (k.code === 'ArrowRight') { this.list[row.i] = o[(o.indexOf(this.list[row.i]) + 1) % o.length]; A.play(20); }
+      else if (k.code === 'ArrowLeft') { this.list[row.i] = 'off'; A.play(21); }
       else if (U.isOK(k) || U.isBack(k)) {
         const on = this.list.filter(c => c !== 'off');
         if (!on.length) { this.err = 'Pick at least one keyboard or joystick'; this.errT = 150; A.play(40); return; }
         if (new Set(on).size !== on.length) { this.err = AB.msg(45, 'More than one player selected to an input device!'); this.errT = 150; A.play(40); return; }
-        AB.settings.netLocal = on; AB.saveSettings(); A.play(10); SC.go('network');
+        // colours follow the players that are on, in order
+        AB.settings.netLocal = on;
+        AB.settings.netColours = this.list.map((c, i) => (c !== 'off' ? this.cols[i] : -1)).filter(c => c >= 0);
+        AB.saveSettings(); A.play(10); SC.go('network');
       }
     },
     tick() { if (this.errT > 0) this.errT--; },
@@ -324,25 +343,33 @@
       U.centerText(ctx, 'PLAYERS ON THIS COMPUTER', 34, YELLOW);
       G.text(ctx, 'Each computer brings up to four players. Computer players are added by the host in the room.', 320, 58, GREY, 'font0', 1);
       const label = SC.uiLate().controlLabel, name = AB.settings.netName;
-      const on = this.list.filter(c => c !== 'off').length;
-      let n = 0;
-      this.list.forEach((c, i) => {
-        const y = 96 + i * 30, sel = i === this.sel;
+      const on = this.list.filter(c => c !== 'off').length, rows = this.rows();
+      let n = 0, y = 84;
+      rows.forEach((row, ri) => {
+        const sel = ri === this.sel, c = this.list[row.i];
         if (sel) U.menuCursor(ctx, 60, y + 17);
-        if (c !== 'off') U.miniHead(ctx, n, 84, y);
-        G.text(ctx, `Player ${i + 1}: ${label(c)}`, 104, y, c === 'off' ? GREY : sel ? YELLOW : WHITE, 'font1');
-        if (c !== 'off') { n++; G.text(ctx, on > 1 ? `${name} ${n}` : name, 330, y + 2, CYAN, 'font0'); }
+        if (row.k === 'ctl') {
+          G.text(ctx, `Player ${row.i + 1}: ${label(c)}`, 104, y, c === 'off' ? GREY : sel ? YELLOW : WHITE, 'font1');
+          if (c !== 'off') { n++; G.text(ctx, on > 1 ? `${name} ${n}` : name, 340, y + 2, CYAN, 'font0'); }
+          y += 22;
+        } else {
+          U.miniHead(ctx, this.cols[row.i], 124, y);
+          G.text(ctx, 'Colour: ' + AB.COLOUR_NAMES[this.cols[row.i]], 144, y, sel ? YELLOW : WHITE, 'font1');
+          y += 26;
+        }
       });
       // what the keys are, as on the Player Setup screen
-      G.text(ctx, 'Keyboard layouts (Options > Define keyboard layouts):', 84, 232, YELLOW, 'font0');
+      const ky = 290;
+      G.text(ctx, 'Keyboard layouts (Options > Define keyboard layouts):', 84, ky, YELLOW, 'font0');
       const kl = (c) => I.keyLabel(c).replace('Num ', 'N').replace('Enter', 'Ent').replace('Space', 'Spc');
       I.layouts.forEach((Ly, i) => {
         const dirs = Ly.up === 'ArrowUp' && Ly.down === 'ArrowDown' && Ly.left === 'ArrowLeft' ? 'Arrows' : `${kl(Ly.up)}${kl(Ly.left)}${kl(Ly.down)}${kl(Ly.right)}`;
-        G.text(ctx, `KEY ${i}:  ${dirs}   bomb ${kl(Ly.bomb)}   action ${kl(Ly.action)}`, 100, 252 + i * 18, WHITE, 'font0');
+        G.text(ctx, `KEY ${i}:  ${dirs}   bomb ${kl(Ly.bomb)}   action ${kl(Ly.action)}`, 100, ky + 18 + i * 16, WHITE, 'font0');
       });
       const pads = I.pads();
-      G.text(ctx, pads.length ? pads.map((p, i) => `JOY ${i}: ${p.id.slice(0, 28)}`).join('   ') : 'No joysticks detected (press a button on one to wake it up)', 100, 252 + I.layouts.length * 18 + 8, GREY, 'font0');
-      G.text(ctx, 'Right: change   Left: off   Enter or Esc: done', 320, 418, GREY, 'font0', 1);
+      G.text(ctx, pads.length ? pads.map((p, i) => `JOY ${i}: ${p.id.slice(0, 28)}`).join('   ') : 'No joysticks detected (press a button on one to wake it up)', 100, ky + 18 + I.layouts.length * 16 + 6, GREY, 'font0');
+      G.text(ctx, 'Right: change   Left: off (or the other way on a colour)   Enter or Esc: done', 320, 418, GREY, 'font0', 1);
+      G.text(ctx, 'If two players want the same colour, the one who joined first keeps it.', 320, 400, GREY, 'font0', 1);
       if (this.errT > 0) { U.panel(ctx, 100, 200, 440, 50, 0.92); U.centerText(ctx, this.err, 216, ORANGE, 'font0'); }
     },
   });
@@ -364,11 +391,11 @@
   SC.register('room', {
     help: 'portnet',
     enter() {
-      this.err = null; this.errT = 0; if (this.sel === undefined) this.sel = 2;
+      this.err = null; this.errT = 0; if (this.sel === undefined) this.sel = 3;
       NP.leaveLobby(); A.music('menu');
       if (NP.room && NP.room.host) { NP.room.inGame = false; NP.setState('waiting'); }
     },
-    rows() { return [{ k: 'ais' }, { k: 'setup' }, { k: 'start' }]; },
+    rows() { return [{ k: 'ais' }, { k: 'skill' }, { k: 'setup' }, { k: 'start' }]; },
     key(k) {
       const room = NP.room; if (!room) { SC.go('network'); return; }
       if (U.isBack(k) && k.pad === undefined) { NP.leave(); SC.go('network'); return; }
@@ -380,9 +407,13 @@
       else if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight') && row.k === 'ais') {
         room.ais = AB.clamp(room.ais + (k.code === 'ArrowLeft' ? -1 : 1), 0, NP.MAX_PLAYERS - humans);
         AB.settings.netAIs = room.ais; AB.saveSettings(); A.play(20); NP.refreshRoom();
+      } else if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight' || U.isOK(k)) && row.k === 'skill') {
+        const L = AB.AI.LEVELS, d = k.code === 'ArrowLeft' ? -1 : 1;
+        room.aiLevel = L[(L.indexOf(room.aiLevel) + d + L.length) % L.length];
+        AB.settings.netAILevel = room.aiLevel; AB.saveSettings(); A.play(20); NP.refreshRoom();
       } else if (U.isOK(k)) {
         if (row.k === 'setup') { A.play(10); SC.go('netsetup'); return; }
-        if (row.k === 'ais') { this.sel = 2; return; }
+        if (row.k === 'ais') { this.sel = 3; return; }
         if (humans + room.ais < 2) { this.err = 'Need at least two players: wait for someone to join, or add computer players.'; this.errT = 240; A.play(40); return; }
         A.play(10); NM.hostStart(1);
       }
@@ -397,12 +428,15 @@
       G.text(ctx, room.host ? 'You are the host: set up the match, then start it.' : 'Waiting for the host to start the match...', 320, 56, room.host ? CYAN : GREY, 'font0', 1);
       // computers and their players
       G.text(ctx, 'Computer', 56, 78, GREY, 'font0'); G.text(ctx, 'Players', 260, 78, GREY, 'font0'); G.text(ctx, 'Ping', 584, 78, GREY, 'font0', 2);
+      // everyone's colour as the host has sorted them out (first come, first served)
+      const cols = room.host ? NP.assignColours(room.members, room.ais) : null;
+      const aiCols = room.host ? cols.slice(cols.length - room.ais) : (room.info && room.info.aiColours) || [];
       let slot = 0;
       room.members.forEach((m, i) => {
         const y = 94 + i * 28, mine = m.id === room.me;
         if (mine) { ctx.fillStyle = 'rgba(96,240,96,0.10)'; ctx.fillRect(44, y - 4, 552, 26); }
         G.text(ctx, fit(m.name, 150) + (i === 0 ? '  (host)' : ''), 56, y, mine ? YELLOW : WHITE, 'font1');
-        m.players.forEach((p, j) => { U.miniHead(ctx, slot, 268 + j * 22, y + 2); slot++; });
+        m.players.forEach((p, j) => { U.miniHead(ctx, cols ? cols[slot] : (p.color | 0), 268 + j * 22, y + 2); slot++; });
         G.text(ctx, fit(m.players.map(p => (typeof p === 'string' ? p : p.name)).join(', '), 250 - m.players.length * 22, 'font0'), 268 + m.players.length * 22 + 6, y + 2, GREY, 'font0');
         if (i === 0) G.text(ctx, 'host', 584, y + 2, GREY, 'font0', 2);
         else G.text(ctx, Math.round(m.ping || 0) + ' ms', 584, y + 2, pingCol(m.ping || 0), 'font0', 2);
@@ -417,7 +451,10 @@
         const col = !room.host ? GREY : sel ? YELLOW : WHITE;
         if (row.k === 'ais') {
           G.text(ctx, `Computer players: ${room.ais}`, 70, y, col, 'font1');
-          for (let k = 0; k < room.ais; k++) U.miniHead(ctx, slot + k, 290 + k * 20, y + 2);
+          for (let k = 0; k < room.ais; k++) U.miniHead(ctx, aiCols[k] !== undefined ? aiCols[k] : slot + k, 290 + k * 20, y + 2);
+          if (sel) G.text(ctx, 'Left/Right', 590, y + 2, GREY, 'font0', 2);
+        } else if (row.k === 'skill') {
+          G.text(ctx, `Computer skill: ${AB.AI.LEVEL_NAMES[room.aiLevel || 'hard']}`, 70, y, col, 'font1');
           if (sel) G.text(ctx, 'Left/Right', 590, y + 2, GREY, 'font0', 2);
         } else if (row.k === 'setup') {
           G.text(ctx, room.host ? 'Match settings  >' : 'Match settings:', 70, y, col, 'font1');
@@ -425,11 +462,11 @@
         } else if (room.host) G.text(ctx, 'START THE MATCH!', 70, y, col, 'font1');
       });
       const lines = settingsLines(set);
-      const ly = ys + (room.host ? 3 : 2) * 24 + 2;
+      const ly = ys + (room.host ? 4 : 3) * 24 + 2;
       lines.forEach((t, i) => G.text(ctx, fit(t, 540, 'font0'), 70, ly + i * 15, GREY, 'font0'));
       // recent events
       const logY = ly + lines.length * 15 + 8;
-      room.log.slice(-AB.clamp(Math.floor((410 - logY) / 14), 1, 4)).forEach((t, i) => G.text(ctx, t, 56, logY + i * 14, '#9aa', 'font0'));
+      room.log.slice(-AB.clamp(Math.floor((412 - logY) / 14), 0, 4) || room.log.length).forEach((t, i) => G.text(ctx, t, 56, logY + i * 14, '#9aa', 'font0'));
       const hint = room.host ? 'Up/Down: choose   Enter: select   Esc: close the room' : 'Esc: leave the room';
       G.text(ctx, hint, 320, 420, GREY, 'font0', 1);
       if (this.errT > 0) { U.panel(ctx, 60, 196, 520, 50, 0.92); U.centerText(ctx, fit(this.err, 500, 'font0'), 214, ORANGE, 'font0'); }

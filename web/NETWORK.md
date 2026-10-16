@@ -9,8 +9,11 @@ needs no server of its own, so it works from GitHub Pages as it is.
 
 * **Your name** is at the top: press Enter on it to type a new one. The first time, it's one of the
   original's random node names (MESSAGES.TXT 500+), and the cursor starts there.
-* **Players here** picks the keyboards and joysticks this computer brings, up to four. It works like
-  the local Player Setup: Right changes a player's control, Left turns it off.
+* **Players here** picks the keyboards and joysticks this computer brings, up to four, and each
+  player's colour. It works like the local Player Setup: Right changes a player's control, Left
+  turns it off. On a colour row, Left and Right step through the ten colours.
+  * The host sorts out clashes in joining order. A player who asks for a colour someone earlier
+    already has gets the next free one, and computer players take what's left.
 * The lobby lists Room 1, 2 and 3. Each shows whether it is empty, waiting for players or playing.
   It also shows the host, who is in the room with their pings, and the host's match settings.
 * Enter on an **empty** room makes you its host. Enter on a **waiting** room joins it. A room that
@@ -22,6 +25,8 @@ needs no server of its own, so it works from GitHub Pages as it is.
   computers and ten players, as in the original.
 * The host has a menu:
   * **Computer players**: Left/Right.
+  * **Computer skill**: Easy, Medium or Original, for all of them. Players whose computer leaves
+    carry on at this skill too.
   * **Match settings**: the local Arena & Match choices, plus the gameplay options a network match
     uses. These are the arenas, scheme, wins or kills needed, play time, random start, conveyor
     speed, stomped bombs, enclosement depth, destroyable diseases and "Lost net players revert to
@@ -35,6 +40,11 @@ needs no server of its own, so it works from GitHub Pages as it is.
 * The match uses the host's match settings. Team play and the Gold Bomberman roulette are off in network games.
 * Sounds, voices, music and graphics are cosmetic, so they stay each player's own choice.
 * Pause and Force Draw are off, because every computer has to stay in step. Esc then Y leaves.
+* **F10 twice** forfeits the round for the players on your computer. It goes out with your next
+  input (`AB.IN.FORFEIT`), so every computer drops them at the same tick.
+* **Only computer players left:** HURRY sounds, and 3 seconds later the walls close in four times
+  as fast and keep going until the arena is full. This applies whether the humans died, forfeited or
+  left. If an AI's kill leaves a single player standing, that's an ordinary win.
 * Between rounds only the host continues to the next round. The others see "Waiting for the
   host...".
 * If a computer falls behind, the others wait for it and show "Waiting for <name>...".
@@ -92,6 +102,12 @@ with "Could not reach the room host (a strict network may need a relay)."
     That takes about 5 seconds, so a room reads "checking..." at first. Enter works on it anyway.
 * **Star topology.** As with the original's IPX host, every member connects only to the host, and
   the host relays everything to the others. Messages are JSON on a reliable, ordered data channel.
+* **Leaving.** A host that leaves frees the room's id at once.
+  * PeerJS fires its "disconnected" event from inside `destroy()`, so the port never reconnects a
+    peer it is closing (`closePeer`). Earlier, that left a ghost holding the room, and re-hosting or
+    rejoining failed.
+  * A lobby whose link to the matchmaking server has dropped reconnects. After 10 seconds it starts
+    over with a new connection.
 * **Compatibility.** Lockstep needs the same game code on every computer.
   * A deployed build carries its commit hash (see the root README's *Versions*). A host turns away
     a computer on another commit: "The host has v1.0.9, you have v1.0.8: the older one should

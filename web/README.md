@@ -33,7 +33,7 @@ Other keys:
 
 * Esc: back, or quit the match
 * P: pause
-* F10: force a draw
+* F10: force a draw (in a network game, press it twice to forfeit the round)
 * F1: help for the current screen
 * M: mute music
 * F11: fullscreen
@@ -60,23 +60,41 @@ opens it, and that still works here. The port also lists it on the main menu, in
 Main menu > **Network Game** plays against people on other computers, straight from the browser.
 There is nothing to install or host.
 
-* In the lobby you set your name and the keyboards and joysticks your computer brings (up to four
-  players).
+* In the lobby you set your name, and the keyboards, joysticks and colours of the players your
+  computer brings (up to four). If two players want the same colour, the one who joined first keeps
+  it.
 * The lobby has three fixed rooms. Pick an empty one to host it, or a waiting one to join. Each
   room shows who is in it, their pings and the host's settings.
-* In the room, the host picks the number of computer players and opens Match settings. That has
+* In the room, the host picks the number of computer players and their skill, and opens Match
+  settings. That has
   the arenas, scheme, wins, play time and gameplay options, as in local play's Arena & Match.
   Everyone sees the choices as they change.
 * Up to five computers and ten players can play, as in the original. Team play and the Gold
   Bomberman roulette are off online.
 * Every computer runs the same simulation in lockstep, and only key presses are sent. If someone
   leaves, their players carry on as computer players.
+* F10 twice gives up the round for the players on your computer. Once only computer players are
+  left, HURRY sounds, and 3 seconds later the walls close in four times as fast and fill the arena.
+  An AI that wins by knocking out the last other player just wins.
 * Keep the game in the front tab while playing: browsers slow down background tabs.
 
 It runs over WebRTC. PeerJS's free public server does the matchmaking, and most home connections then
 link directly. Players on strict networks (some mobile, office or school connections) also need a
 relay. Metered's free tier works for that once its key is in `js/netconfig.js`. Details are in
 NETWORK.md.
+
+## Computer players
+
+Start Game > Player Setup: Right cycles a player through *AI easy*, *AI medium* and *AI original*,
+then the keyboards and joysticks.
+
+* **Original:** the port's AI, as before.
+* **Medium:** thinks it over less often, notices other players' bombs later, chases less and grabs
+  fewer power-ups.
+* **Easy:** all of that, more so.
+
+In a test of 60 rounds per pairing, two of each against two of the other: Original beat Medium 39 to 16, Original beat Easy 42 to 9, and
+Medium beat Easy 33 to 13. In network games the host sets one skill for all the computer players.
 
 ## Arenas
 

@@ -89,6 +89,18 @@
     return o;
   }
   const makePeer = (id) => (id ? new window.Peer(id, peerOptions()) : new window.Peer(peerOptions()));
+  // PeerJS emits 'disconnected' from inside destroy(), before the peer counts as destroyed, so a plain
+  // "reconnect when disconnected" handler would bring a destroyed room back to life as a ghost that
+  // keeps holding the room's id. Peers are therefore closed with closePeer, and reconnect only when
+  // the drop wasn't ours, a moment later, and only if still wanted.
+  function closePeer(p) { if (!p) return; p._abClosing = true; try { p.destroy(); } catch (e) {} }
+  function keepConnected(p, onLost) {
+    p.on('disconnected', () => {
+      if (p._abClosing || p.destroyed) return;
+      if (onLost) onLost();
+      setTimeout(() => { if (!p._abClosing && !p.destroyed && p.disconnected) try { p.reconnect(); } catch (e) {} }, 1000);
+    });
+  }
 
   // ---------------------------------------------------------------- lobby: watch the three rooms
   // Each room's host answers a "probe" connection with the room's state and keeps sending updates.
@@ -96,12 +108,13 @@
   for (let n = 1; n <= NP.ROOMS; n++) L.rooms.push({ n, state: 'checking', info: null, conn: null, t: 0 });
   let lobbyTimer = null;
   NP.enterLobby = async function () {
-    if (L.status === 'online' && L.peer && !L.peer.destroyed) { NP.refreshIce(); startProbing(); return; }
+    // reuse the lobby's connection only if it is still really connected to the matchmaking server
+    if (L.status === 'online' && L.peer && !L.peer.destroyed && !L.peer.disconnected) { NP.refreshIce(); startProbing(); return; }
     L.status = 'connecting'; L.error = '';
     try { await NP.loadLib(); await NP.refreshIce(); } catch (e) { L.status = 'error'; L.error = e.message; return; }
-    if (L.peer) try { L.peer.destroy(); } catch (e) {}
+    closePeer(L.peer);
     const peer = L.peer = makePeer();
-    peer.on('open', () => { L.status = 'online'; startProbing(); });
+    peer.on('open', () => { if (L.peer !== peer) return; L.status = 'online'; for (const r of L.rooms) { r.t = 0; } startProbing(); });
     peer.on('error', (err) => {
       if (err.type === 'peer-unavailable') {
         const m = /room-(\d+)/.exec(err.message || '');
@@ -114,11 +127,20 @@
         L.status = 'error'; L.error = 'Cannot reach the matchmaking server (' + err.type + ').';
       }
     });
-    peer.on('disconnected', () => { if (!peer.destroyed) { L.status = 'connecting'; try { peer.reconnect(); } catch (e) {} } });
+    keepConnected(peer, () => { if (L.peer === peer) L.status = 'connecting'; });
   };
   function startProbing() {
     clearInterval(lobbyTimer);
-    const tick = () => { for (const r of L.rooms) if (!r.conn && now() - r.t > 4000) probe(r); };
+    const tick = () => {
+      // lost the matchmaking server for 10 s and reconnecting hasn't worked: start the lobby afresh
+      if (L.peer && (L.peer.disconnected || L.peer.destroyed)) {
+        L.lostAt = L.lostAt || now();
+        if (now() - L.lostAt > 10000 && !NP.room) { L.lostAt = 0; L.status = 'off'; NP.enterLobby(); }
+        return;
+      }
+      L.lostAt = 0;
+      for (const r of L.rooms) if (!r.conn && now() - r.t > 4000) probe(r);
+    };
     tick(); lobbyTimer = setInterval(tick, 1000);
   }
   function probe(r) {
@@ -138,7 +160,7 @@
     clearInterval(lobbyTimer); lobbyTimer = null;
     for (const r of L.rooms) { if (r.conn) try { r.conn.close(); } catch (e) {} r.conn = null; }
   };
-  NP.shutdown = function () { NP.leaveLobby(); NP.leave(); if (L.peer) try { L.peer.destroy(); } catch (e) {} L.peer = null; L.status = 'off'; };
+  NP.shutdown = function () { NP.leaveLobby(); NP.leave(); closePeer(L.peer); L.peer = null; L.status = 'off'; };
 
   // ---------------------------------------------------------------- rooms
   // member: { id, name, players: [{name, control}], ping, conn (host side), lastSeen, lastTick, ready }
@@ -157,10 +179,25 @@
     if (!list.length) list.push('key0');
     return [...new Set(list)].slice(0, 4);
   };
+  // the colours this computer's players would like (AB.settings.netColours), 0..9 each
+  NP.localColours = function () {
+    const c = Array.isArray(AB.settings.netColours) ? AB.settings.netColours : [];
+    return [0, 1, 2, 3].map(i => (Number.isInteger(c[i]) && c[i] >= 0 && c[i] < 10 ? c[i] : [0, 3, 2, 4][i]));
+  };
+  // colours for everyone in the room: each player gets the one they asked for if nobody earlier has it,
+  // otherwise the next free one; computer players take what is left (host decides, in member order)
+  NP.assignColours = function (members, ais) {
+    const used = new Set(), out = [];
+    const take = (want) => { let c = Number.isInteger(want) ? want : 0; for (let k = 0; k < 10 && used.has(c); k++) c = (c + 1) % 10; used.add(c); return c; };
+    for (const m of members) for (const p of m.players) out.push(take(p.color));
+    for (let i = 0; i < ais; i++) out.push(take(0));
+    return out;
+  };
   function localPlayers() {
     const list = NP.localControls();
     const name = AB.settings.netName;
-    return list.slice(0, 4).map((control, i) => ({ name: list.length > 1 ? `${name} ${i + 1}` : name, control }));
+    const cols = NP.localColours();
+    return list.slice(0, 4).map((control, i) => ({ name: list.length > 1 ? `${name} ${i + 1}` : name, control, color: cols[i] }));
   }
   NP.localPlayers = localPlayers;
 
@@ -174,6 +211,7 @@
   function baseRoom(n, host) {
     return {
       n, host, me: host ? 'host' : null, members: [], state: 'waiting', ais: AB.settings.netAIs | 0, log: [], connecting: true,
+      aiLevel: AB.AI.LEVELS.includes(AB.settings.netAILevel) ? AB.settings.netAILevel : 'hard',
       say(t) { this.log.push(t); if (this.log.length > 5) this.log.shift(); },
       fail: null,
     };
@@ -195,10 +233,10 @@
         res(room);
       });
       peer.on('error', (err) => {
-        if (!opened) { try { peer.destroy(); } catch (e) {} rej(err); return; }
+        if (!opened) { closePeer(peer); rej(err); return; }
         if (err.type === 'network' || err.type === 'server-error') room.say('Matchmaking server connection lost; players already here stay connected.');
       });
-      peer.on('disconnected', () => { if (!peer.destroyed) try { peer.reconnect(); } catch (e) {} });
+      keepConnected(peer);
       peer.on('connection', (c) => hostAccept(room, c));
     }));
   }
@@ -213,10 +251,13 @@
   };
   NP.versionClash = (commit) => !!(commit && AB.VERSION.commit && commit !== AB.VERSION.commit);
   function roomInfo(room) {
+    const cols = NP.assignColours(room.members, room.ais);
+    let k = 0;
     return {
-      n: room.n, state: room.state, hostName: room.members[0] && room.members[0].name, ais: room.ais,
+      n: room.n, state: room.state, hostName: room.members[0] && room.members[0].name, ais: room.ais, aiLevel: room.aiLevel,
+      aiColours: cols.slice(cols.length - room.ais),
       ver: AB.VERSION.text, commit: AB.VERSION.commit,
-      members: room.members.map(m => ({ id: m.id, name: m.name, ping: Math.round(m.ping || 0), players: m.players.map(p => p.name) })),
+      members: room.members.map(m => ({ id: m.id, name: m.name, ping: Math.round(m.ping || 0), players: m.players.map(p => ({ name: p.name, color: cols[k++] })) })),
       settings: NP.matchSettings(),
     };
   }
@@ -248,7 +289,7 @@
               : humanCount(room) + (m.players || []).length > NP.MAX_PLAYERS ? 'Not enough free player slots in that room.' : null;
         if (reason) { c.send({ t: 'reject', reason }); setTimeout(() => c.close(), 500); return; }
         member = { id: 'p' + Math.random().toString(36).slice(2, 8), name: String(m.name || 'Bomberman').slice(0, 20),
-                   players: (m.players || []).slice(0, 4).map(p => ({ name: String(p.name).slice(0, 20), control: String(p.control) })),
+                   players: (m.players || []).slice(0, 4).map(p => ({ name: String(p.name).slice(0, 20), control: String(p.control), color: AB.clamp(p.color | 0, 0, 9) })),
                    ping: 0, conn: c, lastSeen: now(), lastTick: 0, ready: false };
         room.members.push(member);
         room.ais = Math.min(room.ais, NP.MAX_PLAYERS - humanCount(room));
@@ -313,7 +354,7 @@
         room.lastSeen = now();
         if (m.t === 'reject') { clearTimeout(to); room.fail(m.reason); return; }
         if (m.t === 'welcome') { clearTimeout(to); done = true; room.connecting = false; room.me = m.id; room.say('Joined room ' + n + '.'); startMemberTimer(room); res(room); return; }
-        if (m.t === 'room') { room.info = m.info; room.state = m.info.state; room.members = m.info.members; room.ais = m.info.ais; emit({ t: 'room' }); return; }
+        if (m.t === 'room') { room.info = m.info; room.state = m.info.state; room.members = m.info.members; room.ais = m.info.ais; room.aiLevel = m.info.aiLevel || 'hard'; emit({ t: 'room' }); return; }
         if (m.t === 'ping') { c.send({ t: 'pong', ts: m.ts }); return; }
         if (m.t === 'ls') { emit({ t: 'ls', r: m.r, m: m.m }); return; }
         emit(m);     // start / go / drop / next / end / kicked
@@ -337,8 +378,10 @@
     if (!room) return;
     if (room.host) {
       hostBroadcast(room, { t: 'end', reason: 'The host closed the room.' });
-      setTimeout(() => { for (const m of room.members) if (m.conn) try { m.conn.close(); } catch (e) {} try { room.peer.destroy(); } catch (e) {} }, 200);
-      const lr = L.rooms[room.n - 1]; lr.state = 'checking'; lr.t = 0;
+      // let the goodbye go out, then free the room's id (closePeer: no ghost reconnects)
+      room.peer._abClosing = true;
+      setTimeout(() => { for (const m of room.members) if (m.conn) try { m.conn.close(); } catch (e) {} closePeer(room.peer); }, 200);
+      const lr = L.rooms[room.n - 1]; lr.state = 'checking'; lr.t = now();      // probe it again once the id is free
     } else if (room.conn) { try { room.conn.send({ t: 'leave' }); } catch (e) {} setTimeout(() => { try { room.conn.close(); } catch (e) {} }, 100); }
   };
   // closing the tab: say goodbye so the others don't sit waiting for the time-out
@@ -370,14 +413,15 @@
       // players whose computer left carry on as AIs (option #262) or sit the rest of the match out.
       for (const p of prevPlayers) {
         if (p.ai || room.members.some(m => m.id === p.owner)) players.push(Object.assign({}, p));
-        else if (S.lostNetToAI) players.push(Object.assign({}, p, { ai: true, owner: null, control: 'ai' }));
+        else if (S.lostNetToAI) players.push(Object.assign({}, p, { ai: true, aiLevel: room.aiLevel, owner: null, control: 'ai' }));
       }
     } else {
+      const cols = NP.assignColours(room.members, room.ais);
       for (const m of room.members) for (const p of m.players) {
         if (players.length >= NP.MAX_PLAYERS) break;
-        players.push({ slot: players.length, color: players.length, team: 0, ai: false, name: p.name, owner: m.id, control: p.control });
+        players.push({ slot: players.length, color: cols[players.length], team: 0, ai: false, name: p.name, owner: m.id, control: p.control });
       }
-      for (let i = 0; i < room.ais && players.length < NP.MAX_PLAYERS; i++) players.push({ slot: players.length, color: players.length, team: 0, ai: true, name: 'Computer ' + (i + 1), owner: null, control: 'ai' });
+      for (let i = 0; i < room.ais && players.length < NP.MAX_PLAYERS; i++) players.push({ slot: players.length, color: cols[players.length], team: 0, ai: true, aiLevel: room.aiLevel, name: 'Computer ' + (i + 1), owner: null, control: 'ai' });
     }
     const maxPing = Math.max(0, ...room.members.map(m => m.ping || 0));
     const delay = AB.clamp(Math.ceil((maxPing / 2 + 30) / (1000 / AB.TPS)), 3, 14);
@@ -385,6 +429,7 @@
     for (const k of ['conveyorSpeed', 'diseasesDestroyable', 'enclosement', 'playTime', 'randomStart', 'stompedDetonate',
                      'winsNeeded', 'winByKills', 'lostNetToAI', 'scheme']) sim[k] = S[k];
     sim.teamPlay = false; sim.goldBomberman = false;
-    return { round, seed: (Math.random() * 0xffffffff) >>> 0, level: AB.pickArena(S), sim, players, delay };
+    sim.aiFinale = true;           // only computer players left: fast walls (js/game.js updateAIFinale)
+    return { round, seed: (Math.random() * 0xffffffff) >>> 0, level: AB.pickArena(S), sim, players, delay, aiLevel: room.aiLevel };
   };
 })(window.AB);

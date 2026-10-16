@@ -43,7 +43,7 @@
       const ahead = AB.val(910, 15);
       for (let k = 0; k < ahead; k++) {
         const c = idx(e.x, e.y);
-        const t = (k + 1) * AB.K.ENCLOSE_EVERY - g.enc.t;
+        const t = (k + 1) * g.encEvery() - g.enc.t;
         if (t < T[c]) T[c] = t;
         const nx = e.x + DX[e.dir], ny = e.y + DY[e.dir];
         if (nx >= COLS - e.ring || ny >= ROWS - e.ring || nx < e.ring || ny < e.ring + (e.dir === 0 ? 1 : 0)) {
@@ -101,11 +101,54 @@
 
   function enemyOf(g, p, o) { return o !== p && o.alive && (!g.S.teamPlay || o.team !== p.team); }
 
+  // ---- skill levels ----
+  // 'hard' is the original AI, unchanged. The easier ones think it over less often (and keep doing the
+  // same thing meanwhile), notice bombs later, chase people less, drop fewer bombs and care less about
+  // power-ups. Everything random comes from the game's own RNG, so network games stay in step.
+  //   react: ticks between decisions (+ up to `jitter`)   see: how many ticks before a blast they notice it
+  //   chase: how much enemies attract them                bombs: 1-in-N chance to consider a bomb at all
+  const LEVELS = {
+    easy:   { react: 12, jitter: 8, see: 50, chase: 0, bombs: 3, near: 2, items: 2 },
+    medium: { react: 4, jitter: 4, see: 95, chase: 0.6, bombs: 1, near: 3, items: 1 },
+  };
+  AI.LEVELS = ['easy', 'medium', 'hard'];
+  AI.LEVEL_NAMES = { easy: 'Easy', medium: 'Medium', hard: 'Original' };
+  const MOVE = AB.IN.UP | AB.IN.DOWN | AB.IN.LEFT | AB.IN.RIGHT;
   AI.think = function (g, p) {
+    const lv = LEVELS[p.aiLevel];
+    if (!lv) return think(g, p, null);
+    const st = p.ai || (p.ai = {});
+    // between decisions keep walking the same way (bomb and action are single presses, not repeated),
+    // but never on into flames
+    if (st.wait > 0) {
+      st.wait--;
+      const mv = (st.held | 0) & MOVE;
+      const d = mv & AB.IN.UP ? 0 : mv & AB.IN.RIGHT ? 1 : mv & AB.IN.DOWN ? 2 : mv & AB.IN.LEFT ? 3 : -1;
+      const nx = AB.cellX(p.x) + (d < 0 ? 0 : DX[d]), ny = AB.cellY(p.y) + (d < 0 ? 0 : DY[d]);
+      if (d < 0 || !AB.inArena(nx, ny) || g.flameT[idx(nx, ny)] <= 0) return mv;
+      st.wait = 0;
+    }
+    const bits = think(g, p, lv);
+    st.held = bits;
+    // in danger they snap out of it quickly; otherwise they take their time
+    st.wait = st.danger ? 1 : lv.react + g.rng.int(lv.jitter + 1);
+    return bits;
+  };
+  // what an easier AI notices: other players' blasts further off than `see` ticks look safe to it;
+  // its own bombs (it knows where it put them) it always sees
+  function perceive(g, p, T, see) {
+    const U = Float32Array.from(T);
+    const own = new Set();
+    for (const b of g.bombs) if (b && !b.dead && b.owner === p.slot) for (const c of blastCells(g, b)) own.add(c);
+    for (let i = 0; i < U.length; i++) if (U[i] !== Infinity && U[i] > see && !own.has(i)) U[i] = Infinity;
+    return U;
+  }
+
+  function think(g, p, lv) {
     const st = p.ai || (p.ai = {});
     if (st.lastBomb === undefined) { st.lastBomb = -999; st.target = -1; st.t = 0; st.moveTo = -1; st.moveT = 0; }
     if (!p.alive || p.special === 5 || p.special === 6 || p.special === 7) return 0;
-    const T = dangerMap(g, p);
+    const T = lv ? perceive(g, p, dangerMap(g, p), lv.see) : dangerMap(g, p);
     const cx = AB.cellX(p.x), cy = AB.cellY(p.y), here = idx(cx, cy);
     const tpc = Math.ceil(AB.CW * AB.SUB / g.speedOf(p));       // ticks per cell
     let bits = 0;
@@ -118,6 +161,7 @@
     const path = bfs(g, cx, cy, tpc, T);
     const safe = (c) => T[c] === Infinity;
     let goal = -1;
+    st.danger = !safe(here);
 
     if (!safe(here)) {
       // flee: nearest reachable safe cell
@@ -143,13 +187,13 @@
         }
       }
       // powerups within reach (#920)
-      const near = AB.val(920, 4);
+      const near = lv ? lv.near : AB.val(920, 4);
       let bestItem = -1, bdi = 1e9;
       for (const c of path.order) {
         const it = g.items[c];
         if (it >= 0 && !BAD.has(it) && path.dist[c] <= near + 2 && path.dist[c] < bdi && safe(c)) { bdi = path.dist[c]; bestItem = c; }
       }
-      if (bestItem >= 0) goal = bestItem;
+      if (bestItem >= 0 && (!lv || g.rng.chance(lv.items))) goal = bestItem;
       // closing walls: head for the part of the arena that stays open
       if (g.enc && !g.enc.done) {
         const ringOf = (c) => { const x = c % COLS, y = (c / COLS) | 0; return Math.min(x, y, COLS - 1 - x, ROWS - 1 - y); };
@@ -162,7 +206,7 @@
       }
 
       // consider dropping a bomb here
-      if (centred && g.bombsOut(p) < g.maxBombs(p) && !g.bombAtCell(cx, cy) && !p.dis[AB.DIS.CONSTIPATION] && g.tick - st.lastBomb > 20) {
+      if (centred && g.bombsOut(p) < g.maxBombs(p) && !g.bombAtCell(cx, cy) && !p.dis[AB.DIS.CONSTIPATION] && g.tick - st.lastBomb > 20 && (!lv || g.rng.chance(lv.bombs))) {
         const fake = { cx, cy, range: g.flameLen(p) };
         const cells = blastCells(g, fake);
         const set = new Set(cells);
@@ -199,7 +243,8 @@
             const x = c % COLS, y = (c / COLS) | 0;
             let score = 0;
             for (let d = 0; d < 4; d++) { const n = idx(x + DX[d], y + DY[d]); if (AB.inArena(x + DX[d], y + DY[d]) && g.tiles[n] === 2) score += 2; }
-            for (const o of g.players) if (enemyOf(g, p, o)) { const dd = Math.abs(AB.cellX(o.x) - x) + Math.abs(AB.cellY(o.y) - y); if (dd <= 2) score += 3 - dd; }
+            const chase = lv ? lv.chase : 1;
+            if (chase) for (const o of g.players) if (enemyOf(g, p, o)) { const dd = Math.abs(AB.cellX(o.x) - x) + Math.abs(AB.cellY(o.y) - y); if (dd <= 2) score += (3 - dd) * chase; }
             score -= path.dist[c] * 0.15;
             if (score > 0) cand.push([score + g.rng.int(100) / 100, c]);
           }
@@ -241,6 +286,6 @@
     }
     // stop a kicked bomb that is heading back at us
     return bits;
-  };
+  }
   AI._dangerMap = dangerMap;
 })(window.AB);

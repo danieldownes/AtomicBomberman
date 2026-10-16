@@ -39,7 +39,7 @@ window.AB = window.AB || {};
   AB.NONE = -1;
 
   // input bits
-  AB.IN = { UP: 1, DOWN: 2, LEFT: 4, RIGHT: 8, BOMB: 16, ACTION: 32 };
+  AB.IN = { UP: 1, DOWN: 2, LEFT: 4, RIGHT: 8, BOMB: 16, ACTION: 32, FORFEIT: 64 };   // FORFEIT: network F10 (gives up the round)
 
   // ---- original tuning values ----
   AB.val = function (id, def) {
@@ -80,6 +80,7 @@ window.AB = window.AB || {};
   AB.wrapX = (cx) => ((cx % AB.COLS) + AB.COLS) % AB.COLS;
   AB.wrapY = (cy) => ((cy % AB.ROWS) + AB.ROWS) % AB.ROWS;
 
+  AB.COLOUR_NAMES = ['White', 'Black', 'Red', 'Blue', 'Green', 'Yellow', 'Cyan', 'Magenta', 'Orange', 'Purple'];
   // ---- player colours: VALUELST 200..247 (RGB percentages for 0.RMP .. 9.RMP) ----
   AB.PLAYER_RGB = [];
   for (let i = 0; i < 10; i++) {

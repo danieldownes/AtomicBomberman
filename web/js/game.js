@@ -175,6 +175,7 @@
         kills: 0, awesomeCount: 0, tramp: null, warp: null,
         ai: pc.ai ? { plan: null, t: 0 } : null,
         isAI: !!pc.ai,
+        aiLevel: pc.aiLevel || 'hard',      // computer skill: 'easy', 'medium' or 'hard' (the original AI)
       };
       for (let i = 0; i < 15; i++) p.pw[i] = START[i];
       // scheme born-with powerups
@@ -242,6 +243,8 @@
       for (let i = 0; i < this.players.length; i++) {
         const p = this.players[i];
         let bits = inputs ? (inputs[i] | 0) : 0;
+        // a player who forfeits (network F10) drops out of the round on every computer at this tick
+        if ((bits & AB.IN.FORFEIT) && !p.isAI) { if (p.alive && this.state === 'play') { this.killPlayer(p, -1, true); this.ev({ t: 'forfeit', slot: p.slot }); } bits = 0; }
         if (p.isAI && AB.AI) bits = AB.AI.think(this, p);
         p.inBits = bits;
       }
@@ -253,7 +256,7 @@
       this.updateBombs();
       this.updateFlames();
       this.checkDeaths();
-      if (live) { this.updateEnclosement(); this.updateRegen(); this.checkRoundEnd(); }
+      if (live) { if (this.state === 'play') this.updateAIFinale(); this.updateEnclosement(); this.updateRegen(); this.checkRoundEnd(); }
       for (const p of this.players) p.prevIn = p.inBits;
     }
 
@@ -989,10 +992,31 @@
     }
 
     // ------------------------------------------------------------------ hurry / enclosement
+    // network games (S.aiFinale): once only computer players are left, nobody is watching a fair fight,
+    // so HURRY sounds, and 3 s later the walls close in 4 times as fast and fill the whole arena
+    updateAIFinale() {
+      if (!this.S.aiFinale) return;
+      if (this.finaleT === undefined) {
+        if (!this.players.some(p => !p.isAI) || this.players.some(p => p.alive && !p.isAI)) return;
+        if (this.players.filter(p => p.alive).length < 2) return;
+        this.finaleT = 3 * AB.TPS;
+        if (!this.hurry) { this.hurry = true; this.snd(2700, 2799); this.ev({ t: 'hurry' }); }
+        this.hurryShown = 3 * AB.TPS;
+        return;
+      }
+      if (this.finaleT > 0 && --this.finaleT === 0) {
+        const e = this.enc;
+        if (!e) this.enc = { x: 0, y: 0, dir: 1, ring: 0, t: 0, done: false, depth: 99 };
+        else if (e.done) Object.assign(e, { done: false, depth: 99, x: e.ring, y: e.ring, dir: 1, t: 0 });   // carry on inwards
+        else e.depth = 99;
+        this.enc.fast = true;
+      }
+    }
+    encEvery() { return this.enc && this.enc.fast ? Math.max(1, Math.round(K.ENCLOSE_EVERY / 4)) : K.ENCLOSE_EVERY; }
     updateEnclosement() {
       const e = this.enc;
       if (!e || e.done || this.state !== 'play') return;
-      if (++e.t < K.ENCLOSE_EVERY) return;
+      if (++e.t < this.encEvery()) return;
       e.t = 0;
       this.slam(e.x, e.y);
       // advance along the clockwise spiral
@@ -1083,7 +1107,7 @@
     checksum() {
       let h = 2166136261 >>> 0;
       const mix = (v) => { h ^= (v | 0); h = Math.imul(h, 16777619) >>> 0; };
-      mix(this.tick); mix(this.rng.s);
+      mix(this.tick); mix(this.rng.s); if (this.enc) { mix(this.enc.x); mix(this.enc.y); mix(this.enc.ring); mix(this.enc.fast ? 1 : 0); }
       for (const p of this.players) {
         mix(p.x); mix(p.y); mix(p.alive ? 1 : 0); mix(p.special); mix(p.disT); mix(p.held);
         for (const v of p.pw) mix(v);

@@ -264,9 +264,15 @@
     for (let i = 0; i < Math.max(pads.length, 0); i++) o.push('joy' + i);
     return o;
   }
-  function controlLabel(c) {
+  // Player Setup's Right key cycle: the three AI skills are separate steps
+  function setupTokens() {
+    const o = [];
+    for (const c of controlOptions()) { if (c === 'ai') for (const l of AB.AI.LEVELS) o.push('ai:' + l); else o.push(c); }
+    return o;
+  }
+  function controlLabel(c, aiLevel) {
     if (c === 'off') return AB.msg(220, 'OFF');
-    if (c === 'ai') return AB.msg(221, 'AI');
+    if (c === 'ai') return AB.msg(221, 'AI') + (aiLevel ? ' - ' + AB.AI.LEVEL_NAMES[aiLevel].toUpperCase() : '');
     if (c.startsWith('key')) return 'KEY ' + c.slice(3);
     if (c.startsWith('joy')) return 'JOY ' + c.slice(3);
     if (c === 'net') return AB.msg(224, 'NET');
@@ -284,7 +290,11 @@
       if (k.code === 'ArrowUp') this.sel = (this.sel + 9) % 10;
       else if (k.code === 'ArrowDown') this.sel = (this.sel + 1) % 10;
       else if (k.code === 'ArrowRight') {
-        const o = controlOptions(); s.control = o[(o.indexOf(s.control) + 1) % o.length]; A.play(20);
+        // off -> AI easy -> AI medium -> AI original -> KEY 0 ... (the AI's skill rides along in aiLevel)
+        const o = setupTokens(), cur = s.control === 'ai' ? 'ai:' + (s.aiLevel || 'hard') : s.control;
+        const nx = o[(o.indexOf(cur) + 1) % o.length];
+        if (nx.startsWith('ai:')) { s.control = 'ai'; s.aiLevel = nx.slice(3); } else s.control = nx;
+        A.play(20);
       } else if (k.code === 'ArrowLeft') { s.control = 'off'; A.play(21); }
       else if (k.code === 'KeyT') {
         if (AB.settings.teamPlay) { s.team = s.team ? 0 : 1; A.play(20); }
@@ -316,7 +326,9 @@
         miniHead(ctx, i, l[0] + 10, y);
         const label = AB.msg(51, 'Player %u: %s').replace('%u', i + 1).replace('%s', controlLabel(st.control));
         G.text(ctx, label, l[0] + 26, y, st.control === 'off' ? GREY : i === this.sel ? YELLOW : WHITE, 'font1');
-        if (AB.settings.teamPlay && st.control !== 'off') G.text(ctx, AB.msg(230, 'TEAM') + (st.team ? ' 2' : ' 1'), l[0] + 170, y, st.team ? '#ff6060' : WHITE, 'font1');
+        // the AI's skill, small, after "AI"
+        if (st.control === 'ai') G.text(ctx, AB.AI.LEVEL_NAMES[st.aiLevel || 'hard'].toLowerCase(), l[0] + 32 + G.textWidth(label, 'font1'), y + 3, CYAN, 'font0');
+        if (AB.settings.teamPlay && st.control !== 'off') G.text(ctx, AB.msg(230, 'TEAM') + (st.team ? ' 2' : ' 1'), Math.max(l[0] + 170, l[0] + 40 + G.textWidth(label, 'font1') + (st.control === 'ai' ? 60 : 0)), y, st.team ? '#ff6060' : WHITE, 'font1');
       }
       G.text(ctx, AB.msg(40, 'Available Joysticks:'), jh[0], jh[1], YELLOW, 'font1');
       const pads = I.pads();
@@ -329,7 +341,7 @@
         const dirs = L.up === 'ArrowUp' && L.down === 'ArrowDown' && L.left === 'ArrowLeft' ? 'Arrows' : `${kl(L.up)}${kl(L.left)}${kl(L.down)}${kl(L.right)}`;
         G.text(ctx, `KEY ${i}:  ${dirs}   bomb ${kl(L.bomb)}   action ${kl(L.action)}`, jl[0], ky + 24 + i * 20, WHITE, 'font0');
       });
-      G.text(ctx, 'Right: change   Left: off   T: team   Enter: continue', 320, 418, GREY, 'font0', 1);
+      G.text(ctx, 'Right: change (AI: easy, medium, original)   Left: off   T: team   Enter: continue', 320, 418, GREY, 'font0', 1);
       f1Hint(ctx);
       if (this.errT > 0) { panel(ctx, 100, 200, 440, 50, 0.9); centerText(ctx, this.err, 216, ORANGE); }
     },
@@ -409,7 +421,7 @@
   // ---------------------------------------------------------------- match control
   function activeSetup() {
     const list = [];
-    AB.setup.forEach((s, i) => { if (s.control !== 'off') list.push({ slot: i, color: i, team: s.team, ai: s.control === 'ai', control: s.control, name: 'Player ' + (i + 1) }); });
+    AB.setup.forEach((s, i) => { if (s.control !== 'off') list.push({ slot: i, color: i, team: s.team, ai: s.control === 'ai', aiLevel: s.aiLevel || 'hard', control: s.control, name: 'Player ' + (i + 1) }); });
     return list;
   }
   function startMatch(demo) {
@@ -499,7 +511,7 @@
       this.g = new AB.Game({ settings: S, scheme, level, seed, players, match: M, campaign: arg.campaign || null });
       AB.curGame = this.g;
       this.devices = M.players.map(p => p.control.startsWith('key') ? { type: 'key', n: +p.control.slice(3) } : p.control.startsWith('joy') ? { type: 'joy', n: +p.control.slice(3) } : null);
-      this.t = 0; this.overT = 0; this.paused = false; this.quitAsk = false; this.stallT = 0; this.desync = false;
+      this.t = 0; this.overT = 0; this.paused = false; this.quitAsk = false; this.stallT = 0; this.desync = false; this.forfeitAsk = 0;
       this.session = net ? AB.netmatch.makeSession(this.g, this.devices, net) : null;
       const track = AB.gameTrack(S, level);
       if (track) A.music(track); else A.stopMusic();
@@ -522,7 +534,14 @@
         return;
       }
       if (k.code === 'Escape' || (k.code === 'KeyQ' && k.ctrl)) { this.quitAsk = true; return; }
-      if (this.net) return;     // no pause or forced draw in a network game: every computer must stay in step
+      // no pause or forced draw in a network game (every computer must stay in step); F10 twice forfeits
+      if (this.net) {
+        if (k.code === 'F10') {
+          if (this.forfeitAsk > 0) { this.forfeitAsk = 0; AB.netmatch.forfeitAll(); }
+          else if (this.g.players.some((p, i) => p.alive && this.session && this.session.localSlots.includes(i))) this.forfeitAsk = 2 * AB.TPS;
+        }
+        return;
+      }
       if ((k.code === 'KeyP' && !playerKey) || k.code === 'Pause') this.paused = !this.paused;
       if (k.code === 'F10') this.g.forceDraw();
     },
@@ -530,6 +549,7 @@
       const g = this.g;
       this.t++;
       if (this.t === 30 && !AB.match.demo) A.playRange(9000, 9000);    // round-start announcer (unused CD lines)
+      if (this.forfeitAsk > 0) this.forfeitAsk--;
       if (this.session) {
         // lockstep: advance only when every computer's input for the next tick is here. Inputs are
         // always queued `delay` ticks ahead, so only a queue clearly longer than that means this
@@ -601,6 +621,7 @@
       }
       if (this.desync) { panel(ctx, 120, 200, 400, 60, 0.92); centerText(ctx, 'The computers are out of sync.', 214, ORANGE); centerText(ctx, 'Press Esc to leave the match.', 238, WHITE, 'font0'); }
       if (this.paused) { panel(ctx, 220, 210, 200, 50, 0.85); centerText(ctx, 'PAUSED', 226, YELLOW); }
+      if (this.forfeitAsk > 0) { panel(ctx, 150, 206, 340, 40, 0.88); centerText(ctx, 'Press F10 again to forfeit this round', 220, YELLOW, 'font0'); }
       if (this.quitAsk) {
         panel(ctx, 160, 200, 320, 80, 0.88);
         centerText(ctx, 'Quit this match?', 218, YELLOW);
