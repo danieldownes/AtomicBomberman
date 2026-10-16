@@ -1,0 +1,64 @@
+# Deploys the game to GitHub Pages on every push to main, with the version stamped in:
+#   v<MAJOR.MINOR>.<build>   MAJOR.MINOR from web/index.html (window.AB_VERSION.base), build = commits on main
+#   plus the short commit hash and its date, shown on the main menu and in the network lobby.
+# Network play compares the commit, so computers running different builds can't join each other's rooms.
+#
+# One-time setup on GitHub: Settings > Pages > Build and deployment > Source: "GitHub Actions".
+# (With "Deploy from a branch" the site still works, but shows "dev build" and has no commit hash.)
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# one deployment at a time; a newer push waits for the running one instead of cancelling it
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0          # the whole history, so the build number can count the commits
+
+      - name: Stamp the version
+        run: |
+          BUILD=$(git rev-list --count HEAD)
+          COMMIT=$(git rev-parse --short=7 HEAD)
+          DATE=$(git log -1 --format=%cs)
+          sed -i -e "s/__AB_BUILD__/$BUILD/" -e "s/__AB_COMMIT__/$COMMIT/" -e "s/__AB_DATE__/$DATE/" web/index.html
+          LINE=$(grep -o "window.AB_VERSION = {[^}]*}" web/index.html)
+          echo "$LINE"
+          echo "$LINE" | grep -q "commit: '$COMMIT'" || { echo "::error::web/index.html has no AB_VERSION placeholders to stamp"; exit 1; }
+          BASE=$(echo "$LINE" | sed -E "s/.*base: '([^']*)'.*/\1/")
+          echo "### Atomic Bomberman v$BASE.$BUILD ($COMMIT, $DATE)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Collect the site
+        run: |
+          # only what the browser needs: the start page that forwards to web/, and the game itself
+          mkdir -p _site
+          cp index.html _site/
+          cp -r web _site/web
+          rm -rf _site/web/server
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5
