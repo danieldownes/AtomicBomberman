@@ -28,6 +28,12 @@
 </div>
 <div id="hint">F11 fullscreen &middot; Esc back &middot; F1 help &middot; F10 force draw &middot; M mute music</div>
 <script>
+// Version. MAJOR.MINOR is set here by hand. The build number (the number of commits on main), the commit
+// hash and its date are filled in by .github/workflows/pages.yml when it deploys to GitHub Pages; a copy
+// run from disk or a plain server keeps the placeholders and calls itself a dev build.
+window.AB_VERSION = { base: '1.0', build: '__AB_BUILD__', commit: '__AB_COMMIT__', date: '__AB_DATE__' };
+</script>
+<script>
 // Loader. Over http(s) (e.g. GitHub Pages) the data files are fetched so the bar can show real download
 // progress; from file:// fetch is not allowed, so they load as plain script tags. Sizes are only for the
 // progress bar. Then the engine scripts load in order and js/main.js starts the game.
@@ -35,6 +41,8 @@
   const DATA = [['data/gamedata.js', 176836], ['data/fonts.js', 23504], ['data/sprites.js', 3991153], ['data/classic.js', 13297], ['data/campaigns.js', 2542], ['data/sounds.js', 102482]];
   const CODE = ['js/core.js', 'js/gfx.js', 'js/audio.js', 'js/input.js', 'js/game.js', 'js/ai.js', 'js/render.js',
                 'js/net.js', 'js/screens.js', 'js/screens2.js', 'js/netplay.js', 'js/netscreens.js', 'js/main.js'];
+  // a deployed build asks for its own copy of every file (?v=<commit>), so a cached older file can't mix in
+  const V = window.AB_VERSION || {}, bust = /^[0-9a-f]{7,40}$/.test(V.commit || '') ? '?v=' + V.commit : '';
   const bar = document.querySelector('#bar > div'), msg = document.getElementById('lmsg');
   const total = DATA.reduce((a, d) => a + d[1], 0);
   let done = 0;
@@ -44,11 +52,11 @@
     msg.textContent = 'Loading Atomic Bomberman...  ' + (Math.min(got, total) / 1048576).toFixed(1) + ' of ' + (total / 1048576).toFixed(1) + ' MB';
   };
   const tag = (src) => new Promise((res, rej) => {
-    const s = document.createElement('script'); s.src = src; s.onload = res;
+    const s = document.createElement('script'); s.src = src + bust; s.onload = res;
     s.onerror = () => rej(new Error('could not load ' + src)); document.head.appendChild(s);
   });
   async function fetchRun(src, size) {
-    const r = await fetch(src);
+    const r = await fetch(src + bust);
     if (!r.ok) throw new Error(src + ': HTTP ' + r.status);
     let text;
     if (r.body && r.body.getReader) {

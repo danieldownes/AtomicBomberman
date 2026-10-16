@@ -196,9 +196,11 @@
              time: S.playTime, randomStart: !!S.randomStart, conveyor: S.conveyorSpeed | 0, stomped: !!S.stompedDetonate,
              enclosement: S.enclosement | 0, diseases: !!S.diseasesDestroyable, lostToAI: !!S.lostNetToAI };
   };
+  NP.versionClash = (commit) => !!(commit && AB.VERSION.commit && commit !== AB.VERSION.commit);
   function roomInfo(room) {
     return {
       n: room.n, state: room.state, hostName: room.members[0] && room.members[0].name, ais: room.ais,
+      ver: AB.VERSION.text, commit: AB.VERSION.commit,
       members: room.members.map(m => ({ id: m.id, name: m.name, ping: Math.round(m.ping || 0), players: m.players.map(p => p.name) })),
       settings: NP.matchSettings(),
     };
@@ -222,7 +224,10 @@
       if (!m || typeof m !== 'object') return;
       if (m.t === 'hello') {
         if (m.role === 'probe') { room.probes.push(c); c.send({ t: 'room', info: roomInfo(room) }); return; }
+        // lockstep needs the same game code everywhere: builds from different commits can't play together
+        // (a dev copy, with no commit, is only held to the protocol number)
         const reason = m.v !== NP.PROTO ? 'That room runs a different version of the game.'
+          : NP.versionClash(m.commit) ? `The host has ${AB.VERSION.text}, you have ${m.ver || 'another build'}: the older one should reload.`
           : room.state !== 'waiting' ? 'A game is in progress in that room.'
             : room.members.length >= NP.MAX_COMPUTERS ? 'That room is full (5 computers).'
               : humanCount(room) + (m.players || []).length > NP.MAX_PLAYERS ? 'Not enough free player slots in that room.' : null;
@@ -287,7 +292,7 @@
       const c = L.peer.connect(NP.roomPeerId(n), { reliable: true, serialization: 'json', metadata: { role: 'join' } });
       room.conn = c;
       const to = setTimeout(() => room.fail(NP.relay === 'relay' ? 'Could not reach the room host.' : 'Could not reach the room host (a strict network may need a relay).'), 15000);
-      c.on('open', () => c.send({ t: 'hello', v: NP.PROTO, role: 'join', name: AB.settings.netName, players: localPlayers() }));
+      c.on('open', () => c.send({ t: 'hello', v: NP.PROTO, role: 'join', name: AB.settings.netName, players: localPlayers(), commit: AB.VERSION.commit, ver: AB.VERSION.text }));
       c.on('data', (m) => {
         if (!m || typeof m !== 'object') return;
         room.lastSeen = now();

@@ -87,9 +87,14 @@ with "Could not reach the room host (a strict network may need a relay)."
     That takes about 5 seconds, so a room reads "checking..." at first. Enter works on it anyway.
 * **Star topology.** As with the original's IPX host, every member connects only to the host, and
   the host relays everything to the others. Messages are JSON on a reliable, ordered data channel.
-* **Compatibility.** `NP.PROTO` in js/netplay.js is the protocol version. A host turns away other
-  versions with "That room runs a different version of the game". To give a fork its own rooms,
-  change the id prefix.
+* **Compatibility.** Lockstep needs the same game code on every computer.
+  * A deployed build carries its commit hash (see the root README's *Versions*). A host turns away
+    a computer on another commit: "The host has v1.0.9, you have v1.0.8: the older one should
+    reload". The lobby shows the same warning on the room.
+  * Every file is loaded with `?v=<commit>`, so a cached file from an older build can't mix in.
+  * A dev copy (run from disk or a local server, with no commit) is only checked against
+    `NP.PROTO`, the protocol number in js/netplay.js.
+  * To give a fork its own rooms, change the id prefix.
 
 | Message | Direction | Purpose |
 |---|---|---|

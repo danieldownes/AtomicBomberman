@@ -12,6 +12,18 @@ window.AB = window.AB || {};
   AB.OX = 20; AB.OY = 64;           // arena origin on the 640x480 screen
   AB.MAXP = 10;                     // max players
 
+  // ---- version (index.html; stamped by .github/workflows/pages.yml on deploy) ----
+  {
+    const V = window.AB_VERSION || {};
+    const stamped = /^\d+$/.test(V.build || '') && /^[0-9a-f]{7,40}$/.test(V.commit || '');
+    const base = V.base || '1.0';
+    AB.VERSION = {
+      base, build: stamped ? +V.build : null, commit: stamped ? V.commit : null, date: stamped ? V.date : null,
+      text: stamped ? `v${base}.${V.build}` : `v${base} dev`,                          // "v1.0.9"
+      full: stamped ? `v${base}.${V.build} (${V.commit}, ${V.date})` : `v${base} dev build`,
+    };
+  }
+
   // ---- timing ----
   // The original measures everything in "reference frames" at 20 fps (VALUELST #25/#30) and
   // speeds in 1/100 pixel per reference frame. The port simulates at a fixed 60 Hz, i.e. 3 ticks

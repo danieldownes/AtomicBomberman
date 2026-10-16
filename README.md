@@ -31,10 +31,26 @@ Besides the original game, the port adds:
 The first load downloads about 4 MB, and each round loads its sounds (about 4 MB). Both show a
 progress bar.
 
+## Versions
+
+The main menu shows the version, for example **V1.0.9**, with the commit hash and date under it.
+The network lobby shows it too.
+
+* `1.0` is set by hand in `web/index.html` (`window.AB_VERSION.base`).
+* The last number is the build: the number of commits on main, so it goes up with every commit.
+* The build number, commit hash and date are filled in by `.github/workflows/pages.yml` when it
+  deploys the site. A copy run from disk shows "dev build".
+* Network play needs the same game code on every computer, so only computers on the same commit can
+  share a room. A dev copy is exempt.
+
+To turn on the workflow: on GitHub go to Settings > Pages > Build and deployment, and set
+**Source** to **GitHub Actions**. Every push to main then deploys automatically.
+
 ## What's in the repository
 
 ```
 web/          the game (see web/README.md for controls, options and how it works)
+.github/      pages.yml: deploys web/ to GitHub Pages with the version stamped in
 tools/        the scripts that convert the CD into web/ (see tools/README.md)
 decompiled/   pseudo-C of BM95.EXE, used as the reference for the game logic
 ```

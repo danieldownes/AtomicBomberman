@@ -243,6 +243,7 @@
       const st = L.status === 'online' ? ['Connected to the matchmaking server' + relayNote, NP.relay === 'relay failed' ? YELLOW : GREEN] : L.status === 'connecting' ? ['Connecting to the matchmaking server...', YELLOW]
         : L.status === 'error' ? [L.error || 'Offline', ORANGE] : ['Offline', GREY];
       G.text(ctx, st[0], 320, 58, st[1], 'font0', 1);
+      G.text(ctx, AB.VERSION.text, 600, 28, '#778', 'font0', 2);
       const rows = this.rows();
       rows.forEach((row, i) => {
         const sel = i === this.sel;
@@ -274,8 +275,10 @@
             line2 = 'Host: ' + info.hostName + '     ' + info.members.slice(1).map(m => m.name + ' ' + m.ping + ' ms').join(', ');
             col = info.state === 'playing' ? ORANGE : GREEN;
           }
+          const clash = info && NP.versionClash(info.commit);
           G.text(ctx, line1, 170, y + 1, col, 'font0');
-          if (line2) G.text(ctx, fit(line2, 410, 'font0'), 170, y + 20, GREY, 'font0');
+          if (clash) G.text(ctx, fit(`Host has ${info.ver}, you have ${AB.VERSION.text}: the older one should reload`, 410, 'font0'), 170, y + 20, ORANGE, 'font0');
+          else if (line2) G.text(ctx, fit(line2, 410, 'font0'), 170, y + 20, GREY, 'font0');
           if (info && info.settings) G.text(ctx, fit(`${info.settings.scheme}  -  ${info.settings.byKills ? info.settings.wins + ' kills' : info.settings.wins + ' wins'}  -  arenas ${info.settings.arenas}`, 410, 'font0'), 170, y + 36, GREY, 'font0');
         }
       });
