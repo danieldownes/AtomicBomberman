@@ -71,8 +71,10 @@ There is nothing to install or host.
   leaves, their players carry on as computer players.
 * Keep the game in the front tab while playing: browsers slow down background tabs.
 
-It runs over WebRTC using PeerJS's free public matchmaking and relay servers. Details, and how to use
-your own servers, are in NETWORK.md.
+It runs over WebRTC. PeerJS's free public server does the matchmaking, and most home connections then
+link directly. Players on strict networks (some mobile, office or school connections) also need a
+relay. Metered's free tier works for that once its key is in `js/netconfig.js`. Details are in
+NETWORK.md.
 
 ## Arenas
 
@@ -139,7 +141,7 @@ js/gfx.js, audio.js, input.js
 js/net.js           lockstep session: input delay, stalls, checksums, drop-outs (see NETWORK.md)
 js/netplay.js       network rooms over PeerJS/WebRTC: hosting, joining, pings, relaying
 js/netscreens.js    the network lobby and room screens, and the match controller
-js/netconfig.js     optional matchmaking/relay server settings (empty by default)
+js/netconfig.js     optional relay (TURN) and matchmaking server settings (empty by default)
 js/vendor/          PeerJS 1.5.5 (MIT), loaded only for network games
 data/gamedata.js    VALUELST.RES, MESSAGES.TXT, SOUNDLST.RES, all 67 .SCH schemes, EXTRA*.RES, *.BM help
 data/sprites.js     the .ANI sprite files (frames + sequences) as atlases, plus the unused idle and classic sets

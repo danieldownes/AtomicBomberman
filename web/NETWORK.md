@@ -45,18 +45,30 @@ needs no server of its own, so it works from GitHub Pages as it is.
 * Later rounds keep everyone in the same slot, so scores stay with the right player.
 * If the host leaves, the room closes and everyone goes back to the lobby.
 
-## Services used (all free, no account)
+## Services used
 
 * **PeerJS 1.5.5** (`js/vendor/peerjs.min.js`, MIT licence) is a WebRTC wrapper. It loads only
   when Network Game opens.
-* **Signalling:** the public PeerJS server (`0.peerjs.com`) introduces the browsers to each other
-  over a WebSocket. After that, game traffic goes browser to browser over WebRTC data channels.
-* **STUN** (Google) finds a direct route through home routers.
-* **TURN** (PeerJS's public relay) carries the game when no direct route exists, for example on
-  some mobile, corporate or symmetric-NAT networks.
+* **Signalling** (free, no account): the public PeerJS server (`0.peerjs.com`) introduces the
+  browsers to each other over a WebSocket. After that, game traffic goes browser to browser over
+  WebRTC data channels.
+* **STUN** (free, no account): Google's and Cloudflare's public STUN servers tell each browser its
+  public address, so most home connections can link directly.
+* **TURN relay** (optional): some strict networks, such as mobile data, offices and schools, can't
+  link directly, so a relay has to carry the game. None is set up by default:
+  * PeerJS's own free TURN hosts (`eu-0`/`us-0.turn.peerjs.com`) no longer exist. They had no DNS
+    records when tested in October 2026, so the port doesn't use them.
+  * The free option is Metered's [Open Relay](https://www.metered.ca/tools/openrelay/): 20 GB a
+    month on a free account. Put your credentials URL in `js/netconfig.js` (see below). The lobby
+    then says "relay ready".
+  * A relayed computer uses about 70 MB per hour of play (about 9 KB/s each way). Only computers
+    that can't link directly use the relay.
 
-These are shared community services with no uptime guarantee. If the PeerJS server can't be reached,
-the lobby says "Cannot reach the matchmaking server". To use your own servers, see below.
+Checked from a home connection in October 2026: the PeerJS server answered in about 3 seconds, and two
+browsers on one machine connected in under a second. These are shared community services with no
+uptime guarantee. If the PeerJS server can't be reached, the lobby says "Cannot reach the
+matchmaking server". If two computers can't link directly and no relay is set up, joining fails
+with "Could not reach the room host (a strict network may need a relay)."
 
 ## How the rooms work
 
@@ -116,21 +128,37 @@ the lobby says "Cannot reach the matchmaking server". To use your own servers, s
 `AB.net.selfTest()` (browser console) runs two sessions in one page with three ticks of latency and
 checks that both end with the same checksum.
 
-## Using your own servers
+## Relay and server settings
 
-Edit `js/netconfig.js`; it ships empty, and the file has examples. Every computer in a room must use
-the same signalling server.
+Edit `js/netconfig.js`. It ships empty, and the file has examples.
+
+**Free relay (Metered Open Relay).** Sign up at metered.ca and create an app. Then set:
+
+```js
+window.AB_NET_CONFIG = {
+  turnCredentialsUrl: 'https://YOUR-APP.metered.live/api/v1/turn/credentials?apiKey=YOUR-KEY',
+};
+```
+
+* The game fetches that URL once when Network Game opens and adds the servers it returns to the
+  free STUN servers.
+* If the fetch fails, the lobby says "relay unavailable" and direct links still work.
+* The key sits in a public file, so anyone could use your monthly allowance.
+
+**Other servers.**
 
 ```js
 window.AB_NET_CONFIG = {
   peer: { host: 'peer.example.com', port: 443, path: '/', secure: true },   // your PeerServer
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' },
+  iceServers: [{ urls: 'stun:stun.l.google.com:19302' },                    // replaces the default STUN list
                { urls: 'turn:turn.example.com:3478', username: 'u', credential: 'p' }],
 };
 ```
 
-* A PeerServer is `npx peer --port 9000` (the `peer` npm package).
-* Metered's Open Relay and Cloudflare Realtime both have free TURN tiers. You can also run coturn.
+* A PeerServer is `npx peer --port 9000` (the `peer` npm package). Every computer in a room must use
+  the same one.
+* You can also run your own TURN server with coturn. Cloudflare's TURN service needs credentials
+  minted server-side, so it doesn't suit a static site on its own.
 
 URL overrides, mainly for testing:
 

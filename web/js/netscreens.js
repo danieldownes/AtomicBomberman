@@ -55,10 +55,12 @@
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     'Connections',
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
-    'Computers connect to each other directly (WebRTC). The free',
-    'PeerJS server introduces them, and a free relay server carries',
-    'the game when a direct link is not possible. These are shared',
-    'public services, so now and then they may be slow or busy.',
+    'Computers connect to each other directly (WebRTC), and the free',
+    'PeerJS server introduces them. That is a shared public service,',
+    'so now and then it may be slow or busy.',
+    'Most home connections can link directly. Some strict networks',
+    '(mobile data, offices, schools) need a relay server in between.',
+    'When one is set up, the lobby says "relay ready".',
   ].join('\n');
   const pingCol = (ms) => (ms < 80 ? GREEN : ms < 160 ? YELLOW : ORANGE);
   const fit = (t, w, font = 'font1') => { t = String(t); if (G.textWidth(t, font) <= w) return t; while (t.length > 1 && G.textWidth(t + '...', font) > w) t = t.slice(0, -1); return t + '...'; };
@@ -231,7 +233,8 @@
       U.panel(ctx, 30, 22, 580, 420, 0.82);
       U.centerText(ctx, 'NETWORK GAME', 34, YELLOW);
       const L = NP.lobby, S = AB.settings;
-      const st = L.status === 'online' ? ['Connected to the matchmaking server', GREEN] : L.status === 'connecting' ? ['Connecting to the matchmaking server...', YELLOW]
+      const relayNote = NP.relay === 'relay' ? '  -  relay ready' : NP.relay === 'relay failed' ? '  -  relay unavailable' : '';
+      const st = L.status === 'online' ? ['Connected to the matchmaking server' + relayNote, NP.relay === 'relay failed' ? YELLOW : GREEN] : L.status === 'connecting' ? ['Connecting to the matchmaking server...', YELLOW]
         : L.status === 'error' ? [L.error || 'Offline', ORANGE] : ['Offline', GREY];
       G.text(ctx, st[0], 320, 58, st[1], 'font0', 1);
       const rows = this.rows();

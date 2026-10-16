@@ -1,6 +1,8 @@
 // Network play over WebRTC (PeerJS). No server of our own is needed:
 //  - PeerJS's free public server introduces the browsers to each other (signalling only),
-//  - STUN finds a direct route, and PeerJS's default TURN servers relay when no direct route exists.
+//  - public STUN servers find a direct route through home routers,
+//  - a TURN relay, if js/netconfig.js names one (e.g. Metered's free tier), carries the game when no
+//    direct route exists. (PeerJS's own default TURN hosts no longer exist, so they aren't used.)
 //
 // Three fixed rooms. The first computer to enter a room becomes its host by claiming the room's
 // well-known peer id; others connect to that id. The host relays everything (star topology, like the
@@ -8,7 +10,7 @@
 //
 // Overrides for testing or your own servers (see NETWORK.md):
 //   ?peerserver=host:port   use a self-hosted PeerServer (http)      ?ice=none   no STUN/TURN (LAN tests)
-//   window.AB_NET_CONFIG = { peer: {...PeerJS options}, iceServers: [...] }   (set in js/netconfig.js)
+//   window.AB_NET_CONFIG = { peer: {...}, iceServers: [...], turnCredentialsUrl: '...' }   (js/netconfig.js)
 'use strict';
 (function (AB) {
   const NP = AB.netplay = {};
@@ -27,10 +29,37 @@
     s.onload = () => res(); s.onerror = () => rej(new Error('could not load ' + src));
     document.head.appendChild(s);
   });
+  // public STUN servers (free, no account): they only tell a browser its public address
+  const STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
+  // what the ICE servers are, for the lobby's status line: 'direct' (STUN only), 'relay', 'relay failed'
+  NP.relay = 'direct';
+  let ice = STUN;
+  // a TURN provider's credentials endpoint (Metered: https://<app>.metered.live/api/v1/turn/credentials?apiKey=...)
+  async function fetchTurn(url) {
+    const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 6000);
+    try {
+      const r = await fetch(url, { signal: ctl.signal });
+      const j = await r.json();
+      const list = Array.isArray(j) ? j : j.iceServers;
+      if (!Array.isArray(list) || !list.length) throw new Error('no servers');
+      return list;
+    } finally { clearTimeout(to); }
+  }
+  async function resolveIce() {
+    const q = AB.params || new URLSearchParams(location.search), C = window.AB_NET_CONFIG || {};
+    if (q.get('ice') === 'none') { ice = []; NP.relay = 'none'; return; }
+    ice = C.iceServers || STUN;
+    NP.relay = ice.some(s => [].concat(s.urls).some(u => /^turns?:/.test(u))) ? 'relay' : 'direct';
+    if (C.turnCredentialsUrl) {
+      try { ice = ice.concat(await fetchTurn(C.turnCredentialsUrl)); NP.relay = 'relay'; }
+      catch (e) { console.warn('TURN credentials:', e.message); if (NP.relay !== 'relay') NP.relay = 'relay failed'; }
+    }
+  }
   // js/netconfig.js holds optional server settings (empty by default); PeerJS loads only when it's needed
   NP.loadLib = function () {
-    if (window.Peer) return Promise.resolve();
-    if (!libP) libP = script('js/netconfig.js').catch(() => {}).then(() => script('js/vendor/peerjs.min.js'))
+    if (window.Peer && libP) return libP;
+    if (!libP) libP = script('js/netconfig.js').catch(() => {})
+      .then(() => Promise.all([window.Peer ? null : script('js/vendor/peerjs.min.js'), resolveIce()]))
       .catch((e) => { libP = null; throw new Error('could not load PeerJS'); });
     return libP;
   };
@@ -41,8 +70,7 @@
     if (C.peer) Object.assign(o, C.peer);
     const ps = q.get('peerserver');
     if (ps) { const [host, port] = ps.split(':'); Object.assign(o, { host, port: +(port || 9000), path: '/', secure: false }); }
-    if (q.get('ice') === 'none') o.config = { iceServers: [] };
-    else if (C.iceServers) o.config = { iceServers: C.iceServers };
+    o.config = { iceServers: ice };
     return o;
   }
   const makePeer = (id) => (id ? new window.Peer(id, peerOptions()) : new window.Peer(peerOptions()));
@@ -243,7 +271,7 @@
       room.fail = (why) => { if (!done) { done = true; NP.room = null; rej(new Error(why)); } };
       const c = L.peer.connect(NP.roomPeerId(n), { reliable: true, serialization: 'json', metadata: { role: 'join' } });
       room.conn = c;
-      const to = setTimeout(() => room.fail('Could not reach the room host.'), 12000);
+      const to = setTimeout(() => room.fail(NP.relay === 'relay' ? 'Could not reach the room host.' : 'Could not reach the room host (a strict network may need a relay).'), 15000);
       c.on('open', () => c.send({ t: 'hello', v: NP.PROTO, role: 'join', name: AB.settings.netName, players: localPlayers() }));
       c.on('data', (m) => {
         if (!m || typeof m !== 'object') return;
