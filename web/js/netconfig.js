@@ -25,4 +25,5 @@
 //
 // These can be combined in one object. Page address overrides: ?peerserver=host:port (plain http),
 // ?ice=none (no STUN/TURN), ?ice=relay (relay only, to check the relay works).
-window.AB_NET_CONFIG = window.AB_NET_CONFIG || null;
+// The project's relay: the Cloudflare Worker from cloudflare/turn-worker.js.
+window.AB_NET_CONFIG = window.AB_NET_CONFIG || { turnCredentialsUrl: 'https://atomicbomberman.dd-102.workers.dev/' };
