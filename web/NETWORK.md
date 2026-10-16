@@ -7,36 +7,40 @@ needs no server of its own, so it works from GitHub Pages as it is.
 
 **Lobby**
 
+* **Your name** is at the top: press Enter on it to type a new one. The first time, it's one of the
+  original's random node names (MESSAGES.TXT 500+), and the cursor starts there.
+* **Players here** picks the keyboards and joysticks this computer brings, up to four. It works like
+  the local Player Setup: Right changes a player's control, Left turns it off.
 * The lobby lists Room 1, 2 and 3. Each shows whether it is empty, waiting for players or playing.
   It also shows the host, who is in the room with their pings, and the host's match settings.
-* Your name is at the top: press Enter to edit it. The first time, it's one of the original's
-  random node names (MESSAGES.TXT 500+).
 * Enter on an **empty** room makes you its host. Enter on a **waiting** room joins it. A room that
   is **playing** can't be joined until its match ends.
 
 **Room**
 
-* The room lists each computer, its players and its ping to the host.
-* The players on a computer are its keyboard and joystick entries in Start Game > Player Setup, or
-  KEY 0 if there are none. A computer can have up to four players.
-* A room holds up to five computers and ten players, as in the original.
-* The host adds computer players with Left/Right and starts with Enter. At least two players are
-  needed.
+* The room lists each computer, its players and its ping to the host. A room holds up to five
+  computers and ten players, as in the original.
+* The host has a menu:
+  * **Computer players**: Left/Right.
+  * **Match settings**: the local Arena & Match choices, plus the gameplay options a network match
+    uses. These are the arenas, scheme, wins or kills needed, play time, random start, conveyor
+    speed, stomped bombs, enclosement depth, destroyable diseases and "Lost net players revert to
+    AIs".
+  * **Start the match**: at least two players are needed.
+* Everyone in the room sees the settings change as the host picks them. The settings are the host's
+  own Options too, so they carry over to local play.
 
 **Match**
 
-* The match uses the host's settings:
-  * the scheme, ticked arenas, wins or kills needed and play time;
-  * conveyor speed, stomped bombs, enclosement depth, destroyable diseases and random start;
-  * "Lost net players revert to AIs".
-* Team play and the Gold Bomberman roulette are off in network games.
+* The match uses the host's match settings. Team play and the Gold Bomberman roulette are off in network games.
 * Sounds, voices, music and graphics are cosmetic, so they stay each player's own choice.
 * Pause and Force Draw are off, because every computer has to stay in step. Esc then Y leaves.
 * Between rounds only the host continues to the next round. The others see "Waiting for the
   host...".
 * If a computer falls behind, the others wait for it and show "Waiting for <name>...".
 * Keep the game in the front tab. Browsers throttle background tabs, which holds everyone up.
-  A computer that sends no input for 20 seconds is dropped.
+  A computer that sends no input for 20 seconds during a round is dropped. On the results screen
+  between rounds only the pings count, so the host can take as long as it likes.
 
 **When someone leaves**
 
@@ -112,8 +116,11 @@ with "Could not reach the room host (a strict network may need a relay)."
 * **Input delay.** Local input for tick `t` is scheduled for `t + delay`.
   * The host sets the delay each round from the worst ping: `ceil((ping/2 + 30 ms) / 16.7 ms)`,
     kept between 3 and 14 ticks (50–233 ms).
-* **Stalls.** A tick runs only once every remote player's input for it has arrived. A computer
-  that is behind runs up to two ticks per frame to catch up.
+* **Stalls.** A tick runs only once every remote player's input for it has arrived.
+* **Catch-up.** Inputs are always queued `delay` ticks ahead. So only a queue at least two ticks
+  longer than that means a computer has fallen behind, for example after a hiccup. That computer
+  then runs two ticks per frame until it has caught up. Otherwise the game runs at the normal
+  60 ticks a second, the same speed as local play.
 * **Desync checks.** Every 60 ticks each computer sends `game.checksum()`, and any mismatch
   stops the round with a message. (It never happened in testing.)
 * **Rounds.** Lockstep messages carry their round number. Early ones are kept until that round

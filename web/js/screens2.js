@@ -11,7 +11,8 @@
   const NOTE = { 2: 'left out of random by the original', 6: 'left out of random by the original' };
   SC.register('arenas', {
     help: 'options',
-    enter() { this.sel = this.sel || 0; this.err = 0; },
+    // a: { back } - the screen to return to (Arena & Match, or a network room's match settings)
+    enter(a) { this.sel = this.sel || 0; this.err = 0; this.back = (a && a.back) || 'options'; },
     rows() {
       const S = AB.settings, rows = [];
       for (let i = 0; i < AB.LEVELS; i++) rows.push({ lvl: i, label: AB.levelName(i) });
@@ -24,7 +25,8 @@
       const S = AB.settings;
       let n = 0; for (let i = 0; i < AB.LEVELS; i++) if (AB.arenaOn(S, i)) n++;
       if (!n) { this.err = 120; A.play(40); return; }
-      AB.saveSettings(); SC.go('options');
+      AB.saveSettings(); SC.go(this.back);
+      if (AB.netplay && AB.netplay.refreshRoom) AB.netplay.refreshRoom();
     },
     key(k) {
       const rows = this.rows(), row = rows[this.sel], S = AB.settings;

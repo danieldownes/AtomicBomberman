@@ -133,10 +133,17 @@
   NP.on = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
   const emit = (ev) => { for (const fn of [...listeners]) try { fn(ev); } catch (e) { console.error(e); } };
 
-  function localPlayers() {
-    const list = [];
-    AB.setup.forEach((s) => { if (s.control.startsWith('key') || s.control.startsWith('joy')) list.push(s.control); });
+  // the players on this computer: chosen in the lobby (AB.settings.netLocal), or else the keyboard and
+  // joystick entries of the local Player Setup
+  NP.localControls = function () {
+    let list = [];
+    if (Array.isArray(AB.settings.netLocal)) list = AB.settings.netLocal.filter(c => c && c !== 'off');
+    else AB.setup.forEach((s) => { if (s.control.startsWith('key') || s.control.startsWith('joy')) list.push(s.control); });
     if (!list.length) list.push('key0');
+    return [...new Set(list)].slice(0, 4);
+  };
+  function localPlayers() {
+    const list = NP.localControls();
     const name = AB.settings.netName;
     return list.slice(0, 4).map((control, i) => ({ name: list.length > 1 ? `${name} ${i + 1}` : name, control }));
   }
@@ -181,13 +188,19 @@
     }));
   }
 
-  function roomInfo(room) {
+  // the host's match settings as everyone sees them (lobby, room screen)
+  NP.matchSettings = function () {
     const S = AB.settings, sc = window.AB_DATA.schemes[S.scheme];
-    let arenas = 0; for (let i = 0; i < AB.LEVELS; i++) if (AB.arenaOn(S, i)) arenas++;
+    let arenas = 0, one = null; for (let i = 0; i < AB.LEVELS; i++) if (AB.arenaOn(S, i)) { arenas++; one = i; }
+    return { scheme: sc ? sc.name : S.scheme, arenas: arenas === 1 ? AB.levelName(one) : arenas + ' of ' + AB.LEVELS, wins: S.winsNeeded, byKills: !!S.winByKills,
+             time: S.playTime, randomStart: !!S.randomStart, conveyor: S.conveyorSpeed | 0, stomped: !!S.stompedDetonate,
+             enclosement: S.enclosement | 0, diseases: !!S.diseasesDestroyable, lostToAI: !!S.lostNetToAI };
+  };
+  function roomInfo(room) {
     return {
       n: room.n, state: room.state, hostName: room.members[0] && room.members[0].name, ais: room.ais,
       members: room.members.map(m => ({ id: m.id, name: m.name, ping: Math.round(m.ping || 0), players: m.players.map(p => p.name) })),
-      settings: { scheme: sc ? sc.name : S.scheme, arenas: arenas + ' of ' + AB.LEVELS, wins: S.winsNeeded, byKills: !!S.winByKills, time: S.playTime },
+      settings: NP.matchSettings(),
     };
   }
   const humanCount = (room) => room.members.reduce((a, m) => a + m.players.length, 0);
@@ -255,8 +268,10 @@
       const t = now();
       for (const m of room.members.slice(1)) {
         if (m.conn && m.conn.open) try { m.conn.send({ t: 'ping', ts: t }); } catch (e) {}
-        // gone quiet: no answer for 8 s, or no game input for 20 s while playing
-        if (t - m.lastSeen > 8000 || (room.state === 'playing' && room.inGame && m.lastInput && t - m.lastInput > 20000)) hostRemove(room, m, 'timeout');
+        // gone quiet: no answer for 8 s, or no game input for 20 s while a round is running (between
+        // rounds, on the results screen, nobody sends input, so only the pings count there)
+        const live = room.inGame && AB.netmatch && AB.netmatch.roundLive();
+        if (t - m.lastSeen > 8000 || (live && m.lastInput && t - m.lastInput > 20000)) hostRemove(room, m, 'timeout');
       }
       sendRoom(room);
     }, 1000);

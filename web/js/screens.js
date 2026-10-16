@@ -124,7 +124,7 @@
   const yesno = (b) => (b ? 'Yes' : 'No');
   function blink() { return (frame >> 4) % 2 === 0; }
   // shared with the screens in js/screens2.js
-  SC.uiLate = () => ({ arenaPreview, startMatch, nextRound, activeSetup });
+  SC.uiLate = () => ({ arenaPreview, arenaSummary, startMatch, nextRound, activeSetup, controlOptions, controlLabel });
   SC.ui = { YELLOW, WHITE, GREY, ORANGE, CYAN, isOK: (k) => isOK(k), isBack: (k) => isBack(k), panel, glue, glueDim, menuCursor, f1Hint,
             centerText, drawTick, blink, miniHead, miniBomber, fmtTime, frame: () => frame };
 
@@ -505,8 +505,9 @@
       this.t++;
       if (this.t === 30 && !AB.match.demo) A.playRange(9000, 9000);    // round-start announcer (unused CD lines)
       if (this.session) {
-        // lockstep: advance only when every computer's input for the next tick is here; catch up
-        // by one extra tick when we have fallen behind
+        // lockstep: advance only when every computer's input for the next tick is here. Inputs are
+        // always queued `delay` ticks ahead, so only a queue clearly longer than that means this
+        // computer has fallen behind the others; then it runs one extra tick per frame to catch up.
         const s = this.session;
         let steps = 0;
         while (steps < 2 && !this.desync) {
@@ -514,7 +515,7 @@
           steps++;
           for (const e of g.events) this.onEvent(e);
           if (s.desync) { this.desync = true; console.warn('desync', s.desync); }
-          if (s.backlog() < 2) break;
+          if (s.backlog() < s.delay + 2) break;
         }
         this.stallT = steps ? 0 : this.stallT + 1;
       } else {

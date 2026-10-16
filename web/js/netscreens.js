@@ -25,19 +25,19 @@
     ' - Enter on an empty room makes you its host. Enter on a waiting',
     '   room joins it. A room that is playing opens again when its',
     '   match is over.',
-    ' - The players on your computer are the keyboard and joystick',
-    '   entries in Start Game > Player Setup (KEY 0 if there are none),',
-    '   up to four per computer.',
+    ' - Players here: Enter picks the keyboards and joysticks your',
+    '   computer brings, up to four.',
     '',
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     'The room',
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     ' - Ping is the round trip from the host to each computer.',
-    ' - The host adds computer players with Left/Right and starts the',
-    '   match with Enter (at least two players).',
-    ' - The match uses the Options and Arena & Match settings of the',
-    '   host: scheme, arenas, wins needed, play time and so on. Team play',
-    '   and the Gold Bomberman roulette are off in network games.',
+    ' - The host sets the number of computer players, opens Match',
+    '   settings (arenas, scheme, wins, play time and the gameplay',
+    '   options) and starts the match (at least two players).',
+    ' - Everyone in the room sees the settings change as the host picks',
+    '   them. Team play and the Gold Bomberman roulette are off in',
+    '   network games.',
     '',
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     'During a match',
@@ -190,24 +190,29 @@
     NP.send({ t: 'end' }); NM.reset(); if (NP.room) NP.room.inGame = false; NP.setState('waiting'); SC.go('room');
   };
   NM.quit = function () { NP.leave(); NM.reset(); SC.go('network'); };
+  // a round is being played right now (inputs flow): only then does silence from a computer mean it's gone
+  NM.roundLive = () => !!NM.session && SC.name() === 'game';
 
   // ================================================================= LOBBY
   SC.register('network', {
     help: 'portnet',
     get textEntry() { return this.editing; },
     enter() {
-      this.sel = this.sel || 1; this.editing = false; this.busy = null; this.err = NM.notice || null; this.errT = NM.notice ? 400 : 0; NM.notice = null;
+      // first visit: start on the name, so it's obvious it can be changed
+      if (this.sel === undefined) this.sel = AB.settings.netNameSet ? 2 : 0;
+      this.editing = false; this.busy = null; this.err = NM.notice || null; this.errT = NM.notice ? 400 : 0; NM.notice = null;
       if (NP.room) NP.leave();
       NP.enterLobby();
       A.music('menu');
     },
     leave() { if (!NP.room) NP.leaveLobby(); },
-    rows() { return [{ k: 'name' }, { k: 'room', n: 1 }, { k: 'room', n: 2 }, { k: 'room', n: 3 }, { k: 'back' }]; },
+    rows() { return [{ k: 'name' }, { k: 'local' }, { k: 'room', n: 1 }, { k: 'room', n: 2 }, { k: 'room', n: 3 }, { k: 'back' }]; },
     key(k) {
       const S = AB.settings;
       if (this.editing) {
-        if (k.code === 'Enter' || k.code === 'Escape' || k.code === 'NumpadEnter') { this.editing = false; S.netName = (S.netName || '').trim() || 'Bomberman'; AB.saveSettings(); }
-        else if (k.code === 'Backspace') S.netName = (S.netName || '').slice(0, -1);
+        if (k.code === 'Enter' || k.code === 'Escape' || k.code === 'NumpadEnter') {
+          this.editing = false; S.netName = (S.netName || '').trim() || 'Bomberman'; S.netNameSet = true; AB.saveSettings(); A.play(10);
+        } else if (k.code === 'Backspace') S.netName = (S.netName || '').slice(0, -1);
         else if (k.key && k.key.length === 1 && (S.netName || '').length < 16 && /[\w .!'-]/.test(k.key)) S.netName = (S.netName || '') + k.key;
         return;
       }
@@ -218,7 +223,8 @@
       else if (U.isBack(k)) { NP.shutdown(); SC.go('mainmenu'); }
       else if (U.isOK(k)) {
         if (row.k === 'back') { NP.shutdown(); SC.go('mainmenu'); return; }
-        if (row.k === 'name') { this.editing = true; return; }
+        if (row.k === 'name') { this.editing = true; A.play(10); return; }
+        if (row.k === 'local') { A.play(10); SC.go('netlocal'); return; }
         if (NP.lobby.status !== 'online') { this.err = 'Not connected to the matchmaking server yet.'; this.errT = 180; return; }
         A.play(10);
         const r = NP.lobby.rooms[row.n - 1];
@@ -240,14 +246,19 @@
       const rows = this.rows();
       rows.forEach((row, i) => {
         const sel = i === this.sel;
-        const y = row.k === 'name' ? 86 : row.k === 'back' ? 370 : 140 + (row.n - 1) * 70;
-        const h = row.k === 'room' ? 60 : 22;
+        const y = row.k === 'name' ? 82 : row.k === 'local' ? 106 : row.k === 'back' ? 372 : 146 + (row.n - 1) * 72;
+        const h = row.k === 'room' ? 62 : 22;
         if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.14)'; ctx.fillRect(42, y - 4, 556, h); U.menuCursor(ctx, 56, y + 16); }
         if (row.k === 'name') {
-          G.text(ctx, 'Your name:', 74, y, WHITE, 'font1');
-          G.text(ctx, (S.netName || '') + (this.editing && U.blink() ? '_' : ''), 190, y, this.editing ? YELLOW : CYAN, 'font1');
-          const lp = NP.localPlayers().map(p => p.control.toUpperCase().replace(/(\D+)(\d)/, '$1 $2'));
-          G.text(ctx, 'plays with ' + lp.join(', '), 590, y + 2, GREY, 'font0', 2);
+          G.text(ctx, 'Your name:', 74, y, sel ? YELLOW : WHITE, 'font1');
+          G.text(ctx, (S.netName || '') + (this.editing && U.blink() ? '_' : ''), 210, y, this.editing ? YELLOW : CYAN, 'font1');
+          if (sel && !this.editing) G.text(ctx, 'Enter: change', 590, y + 2, GREY, 'font0', 2);
+        } else if (row.k === 'local') {
+          G.text(ctx, 'Players here:', 74, y, sel ? YELLOW : WHITE, 'font1');
+          const lp = NP.localControls();
+          lp.forEach((c, j) => U.miniHead(ctx, j, 210 + j * 20, y + 2));
+          G.text(ctx, lp.map(c => c.toUpperCase().replace(/(\D+)(\d)/, '$1 $2')).join(', '), 214 + lp.length * 20, y + 2, CYAN, 'font0');
+          if (sel) G.text(ctx, 'Enter: change', 590, y + 2, GREY, 'font0', 2);
         } else if (row.k === 'back') {
           G.text(ctx, 'Back', 74, y, sel ? YELLOW : WHITE, 'font1');
         } else {
@@ -268,26 +279,101 @@
           if (info && info.settings) G.text(ctx, fit(`${info.settings.scheme}  -  ${info.settings.byKills ? info.settings.wins + ' kills' : info.settings.wins + ' wins'}  -  arenas ${info.settings.arenas}`, 410, 'font0'), 170, y + 36, GREY, 'font0');
         }
       });
-      G.text(ctx, 'Players on this computer come from Start Game > Player Setup (keyboard and joystick entries).', 320, 400, GREY, 'font0', 1);
-      G.text(ctx, this.editing ? 'Type a name, Enter when done' : 'Up/Down: choose   Enter: join or host   Esc: back', 320, 418, GREY, 'font0', 1);
+      G.text(ctx, this.editing ? 'Type a name, Enter when done' : 'Up/Down: choose   Enter: change, join or host   Esc: back', 320, 418, GREY, 'font0', 1);
       if (this.busy) { U.panel(ctx, 160, 200, 320, 44, 0.92); U.centerText(ctx, this.busy, 214, YELLOW); }
       else if (this.errT > 0 && this.err) { U.panel(ctx, 70, 196, 500, 50, 0.92); U.centerText(ctx, fit(this.err, 480, 'font0'), 214, ORANGE, 'font0'); }
     },
   });
 
+  // ================================================================= PLAYERS ON THIS COMPUTER
+  // like the local Player Setup, for the (up to four) players this computer brings to a network game
+  SC.register('netlocal', {
+    help: 'portnet',
+    enter() {
+      const cur = NP.localControls();
+      this.list = [0, 1, 2, 3].map(i => cur[i] || 'off');
+      this.sel = 0; this.err = null; this.errT = 0;
+    },
+    opts() { return SC.uiLate().controlOptions().filter(c => c !== 'ai'); },
+    key(k) {
+      const o = this.opts();
+      if (k.code === 'ArrowUp') { this.sel = (this.sel + 3) % 4; A.play(20); }
+      else if (k.code === 'ArrowDown') { this.sel = (this.sel + 1) % 4; A.play(21); }
+      else if (k.code === 'ArrowRight') { this.list[this.sel] = o[(o.indexOf(this.list[this.sel]) + 1) % o.length]; A.play(20); }
+      else if (k.code === 'ArrowLeft') { this.list[this.sel] = 'off'; A.play(21); }
+      else if (U.isOK(k) || U.isBack(k)) {
+        const on = this.list.filter(c => c !== 'off');
+        if (!on.length) { this.err = 'Pick at least one keyboard or joystick'; this.errT = 150; A.play(40); return; }
+        if (new Set(on).size !== on.length) { this.err = AB.msg(45, 'More than one player selected to an input device!'); this.errT = 150; A.play(40); return; }
+        AB.settings.netLocal = on; AB.saveSettings(); A.play(10); SC.go('network');
+      }
+    },
+    tick() { if (this.errT > 0) this.errT--; },
+    render(ctx) {
+      U.glueDim(ctx, 1);
+      U.panel(ctx, 30, 22, 580, 420, 0.82);
+      U.centerText(ctx, 'PLAYERS ON THIS COMPUTER', 34, YELLOW);
+      G.text(ctx, 'Each computer brings up to four players. Computer players are added by the host in the room.', 320, 58, GREY, 'font0', 1);
+      const label = SC.uiLate().controlLabel, name = AB.settings.netName;
+      const on = this.list.filter(c => c !== 'off').length;
+      let n = 0;
+      this.list.forEach((c, i) => {
+        const y = 96 + i * 30, sel = i === this.sel;
+        if (sel) U.menuCursor(ctx, 60, y + 17);
+        if (c !== 'off') U.miniHead(ctx, n, 84, y);
+        G.text(ctx, `Player ${i + 1}: ${label(c)}`, 104, y, c === 'off' ? GREY : sel ? YELLOW : WHITE, 'font1');
+        if (c !== 'off') { n++; G.text(ctx, on > 1 ? `${name} ${n}` : name, 330, y + 2, CYAN, 'font0'); }
+      });
+      // what the keys are, as on the Player Setup screen
+      G.text(ctx, 'Keyboard layouts (Options > Define keyboard layouts):', 84, 232, YELLOW, 'font0');
+      const kl = (c) => I.keyLabel(c).replace('Num ', 'N').replace('Enter', 'Ent').replace('Space', 'Spc');
+      I.layouts.forEach((Ly, i) => {
+        const dirs = Ly.up === 'ArrowUp' && Ly.down === 'ArrowDown' && Ly.left === 'ArrowLeft' ? 'Arrows' : `${kl(Ly.up)}${kl(Ly.left)}${kl(Ly.down)}${kl(Ly.right)}`;
+        G.text(ctx, `KEY ${i}:  ${dirs}   bomb ${kl(Ly.bomb)}   action ${kl(Ly.action)}`, 100, 252 + i * 18, WHITE, 'font0');
+      });
+      const pads = I.pads();
+      G.text(ctx, pads.length ? pads.map((p, i) => `JOY ${i}: ${p.id.slice(0, 28)}`).join('   ') : 'No joysticks detected (press a button on one to wake it up)', 100, 252 + I.layouts.length * 18 + 8, GREY, 'font0');
+      G.text(ctx, 'Right: change   Left: off   Enter or Esc: done', 320, 418, GREY, 'font0', 1);
+      if (this.errT > 0) { U.panel(ctx, 100, 200, 440, 50, 0.92); U.centerText(ctx, this.err, 216, ORANGE, 'font0'); }
+    },
+  });
+
   // ================================================================= ROOM
+  // the match settings as text lines (the host's own, or the ones a member received)
+  const yn = (b) => (b ? 'Yes' : 'No');
+  const convName = (v) => [AB.msg(295, 'Slow'), AB.msg(296, 'Medium'), AB.msg(297, 'Fast')][v] || '';
+  function settingsLines(set) {
+    if (!set) return [];
+    const L = [`Scheme: ${set.scheme}     Arenas: ${set.arenas}`,
+               `Match: ${set.wins} ${set.byKills ? 'kills' : 'wins'} to win     Play time: ${U.fmtTime(set.time)}`];
+    if (set.conveyor !== undefined) {
+      L.push(`Random start: ${yn(set.randomStart)}   Conveyors: ${convName(set.conveyor)}   Stomped bombs detonate: ${yn(set.stomped)}`);
+      L.push(`Hurry walls: ${AB.msg(315 + set.enclosement, String(set.enclosement))}   Diseases destroyable: ${yn(set.diseases)}   Leavers become AIs: ${yn(set.lostToAI)}`);
+    }
+    return L;
+  }
   SC.register('room', {
     help: 'portnet',
-    enter() { this.err = null; this.errT = 0; NP.leaveLobby(); A.music('menu'); if (NP.room && NP.room.host) { NP.room.inGame = false; NP.setState('waiting'); } },
+    enter() {
+      this.err = null; this.errT = 0; if (this.sel === undefined) this.sel = 2;
+      NP.leaveLobby(); A.music('menu');
+      if (NP.room && NP.room.host) { NP.room.inGame = false; NP.setState('waiting'); }
+    },
+    rows() { return [{ k: 'ais' }, { k: 'setup' }, { k: 'start' }]; },
     key(k) {
       const room = NP.room; if (!room) { SC.go('network'); return; }
       if (U.isBack(k) && k.pad === undefined) { NP.leave(); SC.go('network'); return; }
       if (!room.host) return;
+      const rows = this.rows(), row = rows[this.sel];
       const humans = room.members.reduce((a, m) => a + m.players.length, 0);
-      if (k.code === 'ArrowLeft' || k.code === 'ArrowRight') {
+      if (k.code === 'ArrowUp') { this.sel = (this.sel + rows.length - 1) % rows.length; A.play(20); }
+      else if (k.code === 'ArrowDown') { this.sel = (this.sel + 1) % rows.length; A.play(21); }
+      else if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight') && row.k === 'ais') {
         room.ais = AB.clamp(room.ais + (k.code === 'ArrowLeft' ? -1 : 1), 0, NP.MAX_PLAYERS - humans);
         AB.settings.netAIs = room.ais; AB.saveSettings(); A.play(20); NP.refreshRoom();
       } else if (U.isOK(k)) {
+        if (row.k === 'setup') { A.play(10); SC.go('netsetup'); return; }
+        if (row.k === 'ais') { this.sel = 2; return; }
         if (humans + room.ais < 2) { this.err = 'Need at least two players: wait for someone to join, or add computer players.'; this.errT = 240; A.play(40); return; }
         A.play(10); NM.hostStart(1);
       }
@@ -299,39 +385,101 @@
       U.panel(ctx, 30, 22, 580, 420, 0.82);
       if (!room) return;
       U.centerText(ctx, 'ROOM ' + room.n, 34, YELLOW);
-      G.text(ctx, room.host ? 'You are the host. The match uses your Options and Arena & Match settings.' : 'Waiting for the host to start the match...', 320, 56, room.host ? CYAN : GREY, 'font0', 1);
+      G.text(ctx, room.host ? 'You are the host: set up the match, then start it.' : 'Waiting for the host to start the match...', 320, 56, room.host ? CYAN : GREY, 'font0', 1);
       // computers and their players
-      G.text(ctx, 'Computer', 56, 80, GREY, 'font0'); G.text(ctx, 'Players', 260, 80, GREY, 'font0'); G.text(ctx, 'Ping', 584, 80, GREY, 'font0', 2);
+      G.text(ctx, 'Computer', 56, 78, GREY, 'font0'); G.text(ctx, 'Players', 260, 78, GREY, 'font0'); G.text(ctx, 'Ping', 584, 78, GREY, 'font0', 2);
       let slot = 0;
       room.members.forEach((m, i) => {
-        const y = 98 + i * 34, mine = m.id === room.me;
-        if (mine) { ctx.fillStyle = 'rgba(96,240,96,0.10)'; ctx.fillRect(44, y - 4, 552, 30); }
+        const y = 94 + i * 28, mine = m.id === room.me;
+        if (mine) { ctx.fillStyle = 'rgba(96,240,96,0.10)'; ctx.fillRect(44, y - 4, 552, 26); }
         G.text(ctx, fit(m.name, 150) + (i === 0 ? '  (host)' : ''), 56, y, mine ? YELLOW : WHITE, 'font1');
-        m.players.forEach((p, j) => { U.miniHead(ctx, slot, 268 + j * 26, y + 2); slot++; });
-        G.text(ctx, m.players.map(p => (typeof p === 'string' ? p : p.name)).join(', '), 268 + m.players.length * 26 + 6, y + 2, GREY, 'font0');
+        m.players.forEach((p, j) => { U.miniHead(ctx, slot, 268 + j * 22, y + 2); slot++; });
+        G.text(ctx, fit(m.players.map(p => (typeof p === 'string' ? p : p.name)).join(', '), 250 - m.players.length * 22, 'font0'), 268 + m.players.length * 22 + 6, y + 2, GREY, 'font0');
         if (i === 0) G.text(ctx, 'host', 584, y + 2, GREY, 'font0', 2);
         else G.text(ctx, Math.round(m.ping || 0) + ' ms', 584, y + 2, pingCol(m.ping || 0), 'font0', 2);
       });
-      const ys = 98 + Math.max(room.members.length, 1) * 34 + 6;
-      // computer players
-      const aiTxt = `Computer players: ${room.ais}` + (room.host ? '   (Left/Right to change)' : '');
-      G.text(ctx, aiTxt, 56, ys, room.host ? WHITE : GREY, 'font1');
-      for (let k = 0; k < room.ais; k++) U.miniHead(ctx, slot + k, 300 + k * 24 + (room.host ? 140 : 0), ys + 2);
-      // the host's match settings
-      const info = room.host ? null : room.info;
-      const S = AB.settings, sc = window.AB_DATA.schemes[S.scheme];
-      let set;
-      if (room.host) { let a = 0; for (let i = 0; i < AB.LEVELS; i++) if (AB.arenaOn(S, i)) a++; set = { scheme: sc ? sc.name : S.scheme, wins: S.winsNeeded, byKills: S.winByKills, arenas: a + ' of ' + AB.LEVELS, time: S.playTime }; }
-      else set = info && info.settings;
-      if (set) {
-        G.text(ctx, `Scheme: ${set.scheme}`, 56, ys + 34, GREY, 'font0');
-        G.text(ctx, `Match: ${set.wins} ${set.byKills ? 'kills' : 'wins'} to win   Arenas: ${set.arenas}   Time: ${U.fmtTime(set.time)}`, 56, ys + 52, GREY, 'font0');
-      }
+      // the host's menu (members see the same lines, greyed)
+      const ys = 98 + Math.max(room.members.length, 2) * 28 + 6;
+      const set = room.host ? NP.matchSettings() : room.info && room.info.settings;
+      const rows = this.rows();
+      rows.forEach((row, i) => {
+        const y = ys + i * 24, sel = room.host && i === this.sel;
+        if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.14)'; ctx.fillRect(44, y - 3, 552, 22); U.menuCursor(ctx, 50, y + 16); }
+        const col = !room.host ? GREY : sel ? YELLOW : WHITE;
+        if (row.k === 'ais') {
+          G.text(ctx, `Computer players: ${room.ais}`, 70, y, col, 'font1');
+          for (let k = 0; k < room.ais; k++) U.miniHead(ctx, slot + k, 290 + k * 20, y + 2);
+          if (sel) G.text(ctx, 'Left/Right', 590, y + 2, GREY, 'font0', 2);
+        } else if (row.k === 'setup') {
+          G.text(ctx, room.host ? 'Match settings  >' : 'Match settings:', 70, y, col, 'font1');
+          if (sel) G.text(ctx, 'Enter: change', 590, y + 2, GREY, 'font0', 2);
+        } else if (room.host) G.text(ctx, 'START THE MATCH!', 70, y, col, 'font1');
+      });
+      const lines = settingsLines(set);
+      const ly = ys + (room.host ? 3 : 2) * 24 + 2;
+      lines.forEach((t, i) => G.text(ctx, fit(t, 540, 'font0'), 70, ly + i * 15, GREY, 'font0'));
       // recent events
-      room.log.forEach((t, i) => G.text(ctx, t, 56, 330 + i * 15, GREY, 'font0'));
-      const hint = room.host ? 'Enter: start the match   Left/Right: computer players   Esc: close the room' : 'Esc: leave the room';
-      G.text(ctx, hint, 320, 418, GREY, 'font0', 1);
-      if (this.errT > 0) { U.panel(ctx, 60, 196, 520, 50, 0.92); U.centerText(ctx, this.err, 214, ORANGE, 'font0'); }
+      const logY = ly + lines.length * 15 + 8;
+      room.log.slice(-AB.clamp(Math.floor((410 - logY) / 14), 1, 4)).forEach((t, i) => G.text(ctx, t, 56, logY + i * 14, '#9aa', 'font0'));
+      const hint = room.host ? 'Up/Down: choose   Enter: select   Esc: close the room' : 'Esc: leave the room';
+      G.text(ctx, hint, 320, 420, GREY, 'font0', 1);
+      if (this.errT > 0) { U.panel(ctx, 60, 196, 520, 50, 0.92); U.centerText(ctx, fit(this.err, 500, 'font0'), 214, ORANGE, 'font0'); }
+    },
+  });
+
+  // ================================================================= MATCH SETTINGS (host)
+  // the local Arena & Match screen and the gameplay options that a network match uses, in one list;
+  // every change is sent to the room straight away
+  const lbl = (id, d) => AB.msg(id, d).replace(/:?\s*%s\s*$/, '');
+  SC.register('netsetup', {
+    help: 'options',
+    enter() { if (this.sel === undefined) this.sel = 0; if (!NP.isHost()) SC.go('room'); },
+    items() {
+      const S = AB.settings, keys = Object.keys(window.AB_DATA.schemes).sort();
+      const tog = (k) => () => { S[k] = !S[k]; };
+      return [
+        { label: 'Arenas', value: SC.uiLate().arenaSummary(S) + '  >', action: () => SC.go('arenas', { back: 'netsetup' }) },
+        { label: 'Scheme', value: window.AB_DATA.schemes[S.scheme] ? window.AB_DATA.schemes[S.scheme].name : S.scheme,
+          change: (d) => { S.scheme = keys[(keys.indexOf(S.scheme) + d + keys.length) % keys.length]; } },
+        { label: 'Match', value: AB.msg(211, '%u %s to win match').replace('%u', S.winsNeeded).replace('%s', S.winByKills ? AB.msg(209, 'Kills') : AB.msg(208, 'Wins')),
+          change: (d) => { S.winsNeeded = AB.clamp(S.winsNeeded + d, 1, S.winByKills ? 50 : 9); } },
+        { label: lbl(255, 'Win Matches By Kill Total'), value: yn(S.winByKills), change: () => { S.winByKills = !S.winByKills; S.winsNeeded = AB.clamp(S.winsNeeded, 1, S.winByKills ? 50 : 9); } },
+        { label: 'Play Time', value: U.fmtTime(S.playTime), change: (d) => { const t = AB.PLAY_TIMES; S.playTime = t[(t.indexOf(S.playTime) + d + t.length) % t.length]; } },
+        { label: lbl(251, 'Random Start'), value: yn(S.randomStart), change: tog('randomStart') },
+        { label: lbl(253, 'Conveyor Speed'), value: convName(S.conveyorSpeed), change: (d) => { S.conveyorSpeed = (S.conveyorSpeed + d + 3) % 3; } },
+        { label: lbl(254, 'Stomped Bombs Detonate'), value: yn(S.stompedDetonate), change: tog('stompedDetonate') },
+        { label: lbl(257, 'Enclosement Depth'), value: AB.msg(315 + S.enclosement), change: (d) => { S.enclosement = (S.enclosement + d + 4) % 4; } },
+        { label: lbl(261, 'Diseases Can Be Destroyed'), value: yn(S.diseasesDestroyable), change: tog('diseasesDestroyable') },
+        { label: lbl(262, 'Lost net players revert to AIs'), value: yn(S.lostNetToAI), change: tog('lostNetToAI') },
+        { label: 'Back to the room', value: '', action: () => SC.go('room') },
+      ];
+    },
+    key(k) {
+      if (!NP.isHost()) { SC.go('network'); return; }
+      const items = this.items(), it = items[this.sel];
+      if (k.code === 'ArrowUp') { this.sel = (this.sel + items.length - 1) % items.length; A.play(20); }
+      else if (k.code === 'ArrowDown') { this.sel = (this.sel + 1) % items.length; A.play(21); }
+      else if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight') && it.change) { it.change(k.code === 'ArrowLeft' ? -1 : 1); A.play(20); AB.saveSettings(); NP.refreshRoom(); }
+      else if (U.isBack(k)) { AB.saveSettings(); SC.go('room'); }
+      else if (U.isOK(k)) {
+        if (it.action) { A.play(10); it.action(); }
+        else if (it.change) { it.change(1); A.play(20); AB.saveSettings(); NP.refreshRoom(); }
+      }
+    },
+    tick() { if (!NP.room) SC.go('network'); },
+    render(ctx) {
+      U.glueDim(ctx, 6);
+      U.panel(ctx, 30, 22, 580, 420, 0.82);
+      U.centerText(ctx, 'MATCH SETTINGS  -  ROOM ' + (NP.room ? NP.room.n : ''), 34, YELLOW);
+      G.text(ctx, 'Changes show up for everyone in the room straight away.', 320, 56, GREY, 'font0', 1);
+      this.items().forEach((it, i) => {
+        const y = 80 + i * 24, sel = i === this.sel;
+        if (sel) U.menuCursor(ctx, 48, y + 16);
+        G.text(ctx, it.label, 66, y, sel ? YELLOW : WHITE, 'font1');
+        if (it.value) G.text(ctx, fit(it.value, 244), 352, y, sel ? YELLOW : CYAN, 'font1');
+      });
+      G.text(ctx, 'Team play and the Gold Bomberman roulette are off in network games.', 320, 400, GREY, 'font0', 1);
+      G.text(ctx, 'Up/Down: choose   Left/Right: change   Enter: open   Esc: back to the room', 320, 420, GREY, 'font0', 1);
     },
   });
 })(window.AB);

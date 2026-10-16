@@ -60,13 +60,15 @@ opens it, and that still works here. The port also lists it on the main menu, in
 Main menu > **Network Game** plays against people on other computers, straight from the browser.
 There is nothing to install or host.
 
+* In the lobby you set your name and the keyboards and joysticks your computer brings (up to four
+  players).
 * The lobby has three fixed rooms. Pick an empty one to host it, or a waiting one to join. Each
   room shows who is in it, their pings and the host's settings.
-* In the room, the host adds computer players with Left/Right and starts with Enter. Up to five
-  computers and ten players can play, as in the original. Each computer brings the keyboard and
-  joystick players from Start Game > Player Setup.
-* The match uses the host's Options and Arena & Match settings. Team play and the Gold Bomberman
-  roulette are off online.
+* In the room, the host picks the number of computer players and opens Match settings. That has
+  the arenas, scheme, wins, play time and gameplay options, as in local play's Arena & Match.
+  Everyone sees the choices as they change.
+* Up to five computers and ten players can play, as in the original. Team play and the Gold
+  Bomberman roulette are off online.
 * Every computer runs the same simulation in lockstep, and only key presses are sent. If someone
   leaves, their players carry on as computer players.
 * Keep the game in the front tab while playing: browsers slow down background tabs.
