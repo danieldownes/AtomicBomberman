@@ -485,8 +485,7 @@
       const tog = (k) => () => { S[k] = !S[k]; };
       return [
         { label: 'Arenas', value: SC.uiLate().arenaSummary(S) + '  >', action: () => SC.go('arenas', { back: 'netsetup' }) },
-        { label: 'Scheme', value: window.AB_DATA.schemes[S.scheme] ? window.AB_DATA.schemes[S.scheme].name : S.scheme,
-          change: (d) => { S.scheme = keys[(keys.indexOf(S.scheme) + d + keys.length) % keys.length]; } },
+        { label: 'Schemes', value: AB.schemeSummary(S) + '  >', action: () => { const r = NP.room; SC.go('schemes', { back: 'netsetup', players: r ? r.members.reduce((a, m) => a + m.players.length, 0) + r.ais : 2, team: false }); } },
         { label: 'Match', value: AB.msg(211, '%u %s to win match').replace('%u', S.winsNeeded).replace('%s', S.winByKills ? AB.msg(209, 'Kills') : AB.msg(208, 'Wins')),
           change: (d) => { S.winsNeeded = AB.clamp(S.winsNeeded + d, 1, S.winByKills ? 50 : 9); } },
         { label: lbl(255, 'Win Matches By Kill Total'), value: yn(S.winByKills), change: () => { S.winByKills = !S.winByKills; S.winsNeeded = AB.clamp(S.winsNeeded, 1, S.winByKills ? 50 : 9); } },

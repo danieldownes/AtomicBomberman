@@ -245,7 +245,7 @@
   NP.matchSettings = function () {
     const S = AB.settings, sc = window.AB_DATA.schemes[S.scheme];
     let arenas = 0, one = null; for (let i = 0; i < AB.LEVELS; i++) if (AB.arenaOn(S, i)) { arenas++; one = i; }
-    return { scheme: sc ? sc.name : S.scheme, arenas: arenas === 1 ? AB.levelName(one) : arenas + ' of ' + AB.LEVELS, wins: S.winsNeeded, byKills: !!S.winByKills,
+    return { scheme: AB.schemeSummary(S), arenas: arenas === 1 ? AB.levelName(one) : arenas + ' of ' + AB.LEVELS, wins: S.winsNeeded, byKills: !!S.winByKills,
              time: S.playTime, randomStart: !!S.randomStart, conveyor: S.conveyorSpeed | 0, stomped: !!S.stompedDetonate,
              enclosement: S.enclosement | 0, diseases: !!S.diseasesDestroyable, lostToAI: !!S.lostNetToAI };
   };
@@ -428,6 +428,7 @@
     const sim = {};
     for (const k of ['conveyorSpeed', 'diseasesDestroyable', 'enclosement', 'playTime', 'randomStart', 'stompedDetonate',
                      'winsNeeded', 'winByKills', 'lostNetToAI', 'scheme']) sim[k] = S[k];
+    sim.scheme = AB.pickScheme(S);      // one of the host's ticked schemes for this round
     sim.teamPlay = false; sim.goldBomberman = false;
     sim.aiFinale = true;           // only computer players left: fast walls (js/game.js updateAIFinale)
     return { round, seed: (Math.random() * 0xffffffff) >>> 0, level: AB.pickArena(S), sim, players, delay, aiLevel: room.aiLevel };

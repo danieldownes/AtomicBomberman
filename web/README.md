@@ -107,6 +107,26 @@ of the ticked ones.
   power-up icons found unused on the CD (CLASSICS.ANI). Its tiles, bricks, bombs, flames, floor
   and chiptune music are new, made for this port.
 
+## Schemes
+
+Start Game > Arena & Match > **Schemes** (the network host's Match settings and the Options
+screen's *Scheme File* open the same list). Every .SCH layout has a tick box, and each round is
+played on one of the ticked ones.
+
+* The number after each name is who the layout was made for, read from the original's own tags.
+  "(10)" means up to 10 players, "(8 ONLY)" exactly 8, "(5)(5)" two teams, and "(1+)" any number.
+  Layouts that suit the current number of players are shown in green.
+* The highlighted scheme gets a map with its start positions, what everyone starts with, which
+  power-ups it rules out, and how full of bricks it is.
+* **Preset** (Left/Right to browse, Enter to apply) ticks a whole set:
+  * *Recommended for N players*: every layout made for that many.
+  * *Original default*: just the BASIC SET.
+  * *Classic grids*.
+  * *Free-for-all layouts*.
+  * *Team layouts*.
+  * *Small games (made for 4 or fewer)*.
+  * *Everything*.
+
 ## Options added by the port
 
 These are under main menu > Options, next to the original settings.

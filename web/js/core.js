@@ -171,6 +171,40 @@ window.AB = window.AB || {};
     if (!ok.length) for (let i = 0; i < AB.LEVELS; i++) ok.push(i);
     return ok[Math.floor(Math.random() * ok.length)];
   };
+  // ---- schemes (.SCH layouts): tick any number, each round plays one of the ticked ones ----
+  // S.schemes = {key: true}; before this existed there was just S.scheme, which counts as the only tick
+  AB.schemeKeys = () => Object.keys(window.AB_DATA.schemes).sort();
+  AB.schemesOn = (S) => {
+    const all = window.AB_DATA.schemes, on = S.schemes ? Object.keys(S.schemes).filter(k => S.schemes[k] && all[k]) : [];
+    return on.length ? on.sort() : [all[S.scheme] ? S.scheme : 'basic'];
+  };
+  AB.pickScheme = (S) => { const on = AB.schemesOn(S); return on[Math.floor(Math.random() * on.length)]; };
+  // the players a scheme is made for, from the tag in its name (the original's own convention):
+  // "(10)" up to 10, "(8 ONLY)" exactly 8, "(5)(5)" two teams, "(1+)" or no tag: any number
+  AB.schemeFit = function (key) {
+    const sc = window.AB_DATA.schemes[key], name = sc ? sc.name : '';
+    let m;
+    if ((m = /\((\d+)\s*ONLY\)/i.exec(name))) return { kind: 'only', n: +m[1], label: m[1] + ' only', fits: (n) => n === +m[1] };
+    if ((m = /\((\d+)\)\s*\((\d+)\)/.exec(name))) { const a = +m[1], b = +m[2]; return { kind: 'teams', a, b, n: a + b, label: a + ' v ' + b, fits: (n) => n >= 2 && n <= a + b }; }
+    if ((m = /\((\d+)\+\)/.exec(name))) return { kind: 'min', n: +m[1], label: m[1] + '+', fits: (n) => n >= +m[1] };
+    if ((m = /\((\d+)\)/.exec(name))) return { kind: 'max', n: +m[1], label: 'up to ' + m[1], fits: (n) => n <= +m[1] };
+    return { kind: 'any', n: 10, label: 'any', fits: () => true };
+  };
+  // ready-made selections; `players` = how many will play (for the recommended set), teamPlay for team layouts
+  AB.SCHEME_PRESETS = [
+    { id: 'recommended', name: (n) => `Recommended for ${n} players`, keys: (n, team) => AB.schemeKeys().filter(k => { const f = AB.schemeFit(k); return f.fits(n) && (team || f.kind !== 'teams'); }) },
+    { id: 'basic', name: () => 'Original default: Just the BASIC SET!', keys: () => ['basic'] },
+    { id: 'classic', name: () => 'Classic grids', keys: () => ['basic', 'basicsml', 'bman93', 'purist', 'tight', 'og'] },
+    { id: 'ffa', name: () => 'Free-for-all layouts (up to 10)', keys: () => AB.schemeKeys().filter(k => { const f = AB.schemeFit(k); return f.kind === 'any' || f.kind === 'min' || (f.kind === 'max' && f.n >= 10); }) },
+    { id: 'teams', name: () => 'Team layouts (5 v 5 and so on)', keys: () => AB.schemeKeys().filter(k => AB.schemeFit(k).kind === 'teams') },
+    { id: 'small', name: () => 'Small games (made for 4 or fewer)', keys: () => AB.schemeKeys().filter(k => { const f = AB.schemeFit(k); return (f.kind === 'only' || f.kind === 'max') && f.n <= 4; }) },
+    { id: 'all', name: () => 'Everything', keys: () => AB.schemeKeys() },
+  ];
+  AB.schemeSummary = (S) => {
+    const on = AB.schemesOn(S), all = window.AB_DATA.schemes;
+    return on.length === 1 ? (all[on[0]] ? all[on[0]].name : on[0]) : `${on.length} of ${AB.schemeKeys().length} (random)`;
+  };
+
   // idle animations found on the CD but never loaded by the original (ZEN/HEADWIPE/APPLBITE/NUCKBLOW.ANI):
   // the port plays one after a player has stood still for IDLE_AFTER seconds. len = states at 20 fps.
   AB.IDLE_ANIMS = [{ ani: 'zen', seq: 'Unnamed', len: 121 }, { ani: 'headwipe', seq: 'Unnamed', len: 211 },

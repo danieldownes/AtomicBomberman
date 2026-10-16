@@ -28,7 +28,7 @@ needs no server of its own, so it works from GitHub Pages as it is.
   * **Computer skill**: Easy, Medium or Original, for all of them. Players whose computer leaves
     carry on at this skill too.
   * **Match settings**: the local Arena & Match choices, plus the gameplay options a network match
-    uses. These are the arenas, scheme, wins or kills needed, play time, random start, conveyor
+    uses. These are the arenas, ticked schemes (with presets; the host picks one for each round), wins or kills needed, play time, random start, conveyor
     speed, stomped bombs, enclosement depth, destroyable diseases and "Lost net players revert to
     AIs".
   * **Start the match**: at least two players are needed.

@@ -377,8 +377,7 @@
       const S = AB.settings;
       return [
         { label: 'Arenas', value: arenaSummary(S) + '  >', action: () => SC.go('arenas') },
-        { label: 'Scheme', value: window.AB_DATA.schemes[S.scheme] ? window.AB_DATA.schemes[S.scheme].name : S.scheme,
-          change: (d) => { const k = schemeKeys(); S.scheme = k[(k.indexOf(S.scheme) + d + k.length) % k.length]; } },
+        { label: 'Schemes', value: AB.schemeSummary(S) + '  >', action: () => SC.go('schemes', { back: 'options' }) },
         { label: 'Match', value: AB.msg(211, '%u %s to win match').replace('%u', S.winsNeeded).replace('%s', S.winByKills ? AB.msg(209, 'Kills') : AB.msg(208, 'Wins')),
           change: (d) => { S.winsNeeded = AB.clamp(S.winsNeeded + d, 1, S.winByKills ? 50 : 9); } },
         { label: 'Play Time', value: fmtTime(S.playTime),
@@ -436,8 +435,8 @@
   function nextRound() {
     const M = AB.match; M.round++;
     // pick the arena now so the glue screen can load its picture along with this round's sounds
-    const level = AB.pickArena(AB.settings);
-    SC.go('glue', { level, then: () => SC.go('game', { level }) });
+    const level = AB.pickArena(AB.settings), scheme = AB.pickScheme(AB.settings);
+    SC.go('glue', { level, then: () => SC.go('game', { level, scheme }) });
   }
   AB.startMatch = startMatch;
 
@@ -815,7 +814,7 @@
         { label: AB.msg(255, 'Win Matches By Kill Total: %s').replace('%s', yesno(S.winByKills)), change: () => { S.winByKills = !S.winByKills; } },
         { label: AB.msg(256, 'Gold Bomberman: %s').replace('%s', yesno(S.goldBomberman)), change: () => { S.goldBomberman = !S.goldBomberman; } },
         { label: AB.msg(257, 'Enclosement Depth: %s').replace('%s', AB.msg(315 + S.enclosement)), change: (d) => { S.enclosement = (S.enclosement + d + 4) % 4; } },
-        { label: AB.msg(258, 'Scheme File: %s').replace('%s', S.scheme.toUpperCase() + '.SCH'), change: (d) => { const k = schemeKeys(); S.scheme = cyc(k, S.scheme, d); } },
+        { label: AB.msg(258, 'Scheme File: %s').replace('%s', (() => { const on = AB.schemesOn(S); return on.length === 1 ? on[0].toUpperCase() + '.SCH' : on.length + ' ticked'; })()) + '  >', action: () => SC.go('schemes', { back: 'settings' }) },
         { label: AB.msg(259, 'Play Time: %s').replace('%s', fmtTime(S.playTime)), change: (d) => { S.playTime = cyc(AB.PLAY_TIMES, S.playTime, d); } },
         { label: AB.msg(260, 'Assign Keyboard Player: %s').replace('%s', yesno(S.assignKeyboard)), change: () => { S.assignKeyboard = !S.assignKeyboard; } },
         { label: AB.msg(261, 'Diseases Can Be Destroyed: %s').replace('%s', yesno(S.diseasesDestroyable)), change: () => { S.diseasesDestroyable = !S.diseasesDestroyable; } },

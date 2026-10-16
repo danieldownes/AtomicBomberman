@@ -65,6 +65,108 @@
     },
   });
 
+  // ================================================================= SCHEMES
+  // tick the .SCH layouts a match may use (each round plays one of them); presets tick a whole set at once.
+  // a: { back, players, team } - where to return, and how many play (for "recommended" and the fit marks)
+  const PW_LABEL = ['bomb', 'flame', 'disease', 'kick', 'skate', 'punch', 'grab', 'spooge', 'gold flame', 'trigger', 'jelly', 'bad disease', 'random', 'slow'];
+  SC.register('schemes', {
+    help: 'options',
+    enter(a) {
+      a = a || {};
+      this.back = a.back || 'options';
+      this.players = a.players || AB.setup.filter(st => st.control !== 'off').length || 2;
+      this.team = a.team !== undefined ? a.team : !!AB.settings.teamPlay;
+      if (this.sel === undefined) { this.sel = 2; this.top = 0; this.preset = 0; }
+      // start on the scheme that's ticked first
+      const on = AB.schemesOn(AB.settings), keys = AB.schemeKeys();
+      if (this.sel < 2) this.sel = 2 + Math.max(0, keys.indexOf(on[0]));
+      this.err = 0;
+    },
+    rows() { return [{ k: 'preset' }, { k: 'done' }].concat(AB.schemeKeys().map(key => ({ k: 'sch', key }))); },
+    ticked() { const S = AB.settings; if (!S.schemes) { S.schemes = {}; for (const k of AB.schemesOn(S)) S.schemes[k] = true; } return S.schemes; },
+    close() {
+      const S = AB.settings, on = this.ticked();
+      if (!Object.values(on).some(Boolean)) { this.err = 120; A.play(40); return; }
+      S.scheme = AB.schemesOn(S)[0];
+      AB.saveSettings(); SC.go(this.back);
+      if (AB.netplay && AB.netplay.refreshRoom) AB.netplay.refreshRoom();
+    },
+    key(k) {
+      const rows = this.rows(), row = rows[this.sel], P = AB.SCHEME_PRESETS;
+      const page = 14;
+      if (k.code === 'ArrowUp') this.sel = (this.sel + rows.length - 1) % rows.length;
+      else if (k.code === 'ArrowDown') this.sel = (this.sel + 1) % rows.length;
+      else if (k.code === 'PageDown') this.sel = Math.min(rows.length - 1, this.sel + page);
+      else if (k.code === 'PageUp') this.sel = Math.max(0, this.sel - page);
+      else if (U.isBack(k)) this.close();
+      else if (row.k === 'preset' && (k.code === 'ArrowLeft' || k.code === 'ArrowRight')) { this.preset = (this.preset + (k.code === 'ArrowLeft' ? P.length - 1 : 1)) % P.length; A.play(20); }
+      else if (row.k === 'preset' && U.isOK(k)) {
+        const keys = P[this.preset].keys(this.players, this.team);
+        if (!keys.length) { A.play(40); return; }
+        AB.settings.schemes = {}; for (const key of keys) AB.settings.schemes[key] = true;
+        AB.saveSettings(); A.play(10);
+        if (AB.netplay && AB.netplay.refreshRoom) AB.netplay.refreshRoom();
+      } else if (row.k === 'done' && U.isOK(k)) { A.play(10); this.close(); }
+      else if (row.k === 'sch' && (U.isOK(k) || k.code === 'ArrowLeft' || k.code === 'ArrowRight')) {
+        const on = this.ticked(); on[row.key] = !on[row.key]; AB.saveSettings(); A.play(20);
+        if (AB.netplay && AB.netplay.refreshRoom) AB.netplay.refreshRoom();
+      }
+    },
+    tick() { if (this.err > 0) this.err--; },
+    render(ctx) {
+      U.glueDim(ctx, 6);
+      U.panel(ctx, 24, 24, 592, 412, 0.78);
+      U.centerText(ctx, 'SCHEMES', 36, YELLOW);
+      const S = AB.settings, rows = this.rows(), on = this.ticked(), P = AB.SCHEME_PRESETS;
+      const nOn = AB.schemeKeys().filter(k => on[k]).length;
+      G.text(ctx, `Each round is played on one of the ticked schemes (${nOn} ticked).  Green = suits ${this.players} players.`, 320, 58, GREY, 'font0', 1);
+      // the preset row and Done, then the scrolling list
+      const pr = P[this.preset], prKeys = pr.keys(this.players, this.team);
+      const drawRow = (i, y, h) => { const sel = i === this.sel; if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.16)'; ctx.fillRect(32, y - 3, 312, h); U.menuCursor(ctx, 44, y + 15); } return sel; };
+      let sel = drawRow(0, 78, 22);
+      G.text(ctx, 'Preset:', 62, 78, sel ? YELLOW : WHITE, 'font1');
+      G.text(ctx, fit(`${pr.name(this.players)} (${prKeys.length})`, 210), 132, 82, sel ? YELLOW : CYAN, 'font0');
+      sel = drawRow(1, 102, 22);
+      G.text(ctx, 'Done', 62, 102, sel ? YELLOW : WHITE, 'font1');
+      const V = 16, list = rows.length - 2;
+      const si = Math.max(0, this.sel - 2);
+      if (this.sel >= 2) { if (si < this.top) this.top = si; if (si >= this.top + V) this.top = si - V + 1; }
+      this.top = AB.clamp(this.top, 0, Math.max(0, list - V));
+      for (let j = 0; j < V && this.top + j < list; j++) {
+        const i = this.top + j + 2, row = rows[i], y = 130 + j * 17;
+        const s2 = drawRow(i, y, 17);
+        const f = AB.schemeFit(row.key), name = window.AB_DATA.schemes[row.key].name.replace(/\s*\((\d+\+?|\d+\s*ONLY)\)(\s*\(\d+\))?\s*$/i, '');
+        U.drawTick(ctx, 60, y - 2, on[row.key] ? 2 : 0, s2);
+        G.text(ctx, fit(name, 190, 'font0'), 82, y + 1, s2 ? YELLOW : on[row.key] ? WHITE : GREY, 'font0');
+        G.text(ctx, f.label, 336, y + 1, f.fits(this.players) ? '#60f060' : '#887', 'font0', 2);
+      }
+      if (this.top > 0) G.text(ctx, '...', 190, 122, GREY, 'font0', 1);
+      if (this.top + V < list) G.text(ctx, '...', 190, 130 + V * 17 - 4, GREY, 'font0', 1);
+      // the highlighted scheme: its layout, who it's for, what everyone starts with
+      const cur = rows[this.sel].k === 'sch' ? rows[this.sel].key : AB.schemesOn(S)[0];
+      const sc = window.AB_DATA.schemes[cur], cw = 15, ch = 13, px = 364, py = 84;
+      ctx.fillStyle = '#203018'; ctx.fillRect(px, py, 15 * cw, 11 * ch);
+      for (let yy = 0; yy < 11; yy++) for (let xx = 0; xx < 15; xx++) {
+        const c = sc.rows[yy][xx];
+        if (c === '#') { ctx.fillStyle = '#9a9aa8'; ctx.fillRect(px + xx * cw + 1, py + yy * ch + 1, cw - 2, ch - 2); }
+        else if (c === ':') { ctx.fillStyle = sc.density < 100 ? 'rgba(176,112,48,0.75)' : '#b07030'; ctx.fillRect(px + xx * cw + 2, py + yy * ch + 2, cw - 4, ch - 4); }
+      }
+      for (const st of sc.starts || []) U.miniHead(ctx, st.p, px + st.x * cw - 1, py + st.y * ch - 2);
+      ctx.strokeStyle = 'rgba(248,216,72,0.6)'; ctx.strokeRect(px - 0.5, py - 0.5, 15 * cw + 1, 11 * ch + 1);
+      const f = AB.schemeFit(cur);
+      let ty = py + 11 * ch + 10;
+      G.text(ctx, fit(sc.name, 230, 'font1'), px, ty, WHITE, 'font1'); ty += 22;
+      G.text(ctx, `${cur.toUpperCase()}.SCH   for ${f.label} players` + (f.kind === 'teams' ? ' (teams)' : ''), px, ty, f.fits(this.players) ? '#60f060' : GREY, 'font0'); ty += 16;
+      const born = (sc.powers || []).filter(p => p.bornwith > 0).map(p => PW_LABEL[p.id] + (p.bornwith > 1 ? ' x' + p.bornwith : ''));
+      const none = (sc.powers || []).filter(p => p.forbidden).map(p => PW_LABEL[p.id]);
+      if (born.length) { G.text(ctx, fit('Start with: ' + born.join(', '), 236, 'font0'), px, ty, CYAN, 'font0'); ty += 16; }
+      if (none.length) { G.text(ctx, fit('No: ' + none.join(', '), 236, 'font0'), px, ty, ORANGE, 'font0'); ty += 16; }
+      G.text(ctx, sc.density < 100 ? `Bricks: ${sc.density}% of the brick spots` : 'Bricks: every brick spot', px, ty, GREY, 'font0');
+      G.text(ctx, 'Up/Down, PgUp/PgDn: choose   Enter/Space: tick   Left/Right: browse presets   Esc: back', 320, 414, GREY, 'font0', 1);
+      if (this.err > 0) { U.panel(ctx, 140, 200, 360, 44, 0.92); U.centerText(ctx, 'Tick at least one scheme', 214, ORANGE); }
+    },
+  });
+
   // ================================================================= CAMPAIGN MODE
   // The original hides this behind 5 x C on the Player Setup screen; the stages come from the CD's
   // *.CAM files. Humans (the keyboard/joystick players from Player Setup) must clear every stage of
