@@ -492,6 +492,8 @@
       // network round: the host decided arena, seed and settings (js/netscreens.js)
       const net = this.net = arg.net || null;
       S.countdown = AB.settings.countdown !== false;          // Options > Round Start Countdown
+      // only computer players left: HURRY, then fast walls all the way (js/game.js; not in campaigns)
+      S.aiFinale = !arg.campaign;
       if (net) Object.assign(S, net.sim);
       // pick an arena: a campaign stage names one, otherwise one of the ticked arenas
       let level = net ? net.level : arg.level !== undefined ? arg.level : AB.testLevel !== undefined ? AB.testLevel : AB.pickArena(S);
@@ -506,12 +508,13 @@
       this.t = 0; this.overT = 0; this.paused = false; this.quitAsk = false; this.stallT = 0; this.desync = false; this.forfeitAsk = 0;
       this.held = []; this.deathShown = {}; this.netStats = null;
       this.session = net ? AB.netmatch.makeSession(this.g, this.devices, net) : null;
-      const track = AB.gameTrack(S, level);
-      if (track) A.music(track); else A.stopMusic();
+      // the round's music starts when the countdown ends (straight away without one)
+      this.track = AB.gameTrack(S, level); this.musicOn = false; this.lastCount = undefined;
+      A.stopMusic();
       // warm up recoloured sprites for the players in this round
       for (const p of M.players) G.prewarm(['walk', 'stand', 'bombs', 'mflame', 'kick'], p.color);
       // decode the timing-critical effects up front; voice clips decode on first use
-      A.predecode(100, 219); A.predecode(300, 363); A.predecode(1300, 1330); A.predecode(2700, 2799);
+      A.predecode(100, 299); A.predecode(300, 363); A.predecode(1300, 1330); A.predecode(2700, 2799);
     },
     key(k) {
       const M = AB.match;
@@ -544,7 +547,16 @@
       this.t++;
       if (this.t === 30 && !AB.match.demo) A.playRange(9000, 9000);    // round-start announcer (unused CD lines)
       if (this.forfeitAsk > 0) this.forfeitAsk--;
-      { const n = g.startDelay > 0 ? Math.ceil(g.startDelay / AB.TPS) : 0; if (n !== this.lastCount) { if (n > 0) A.play(1300); this.lastCount = n; } }
+      // countdown: a wall slam on each number, an explosion on "go", and then the music
+      {
+        const n = g.startDelay > 0 ? Math.ceil(g.startDelay / AB.TPS) : 0;
+        if (n !== this.lastCount) {
+          if (n > 0) A.playRange(140, 146);
+          else if (this.lastCount > 0) A.playRange(200, 299);
+          this.lastCount = n;
+        }
+        if (n === 0 && !this.musicOn) { this.musicOn = true; if (this.track) A.music(this.track); }
+      }
       if (this.session) {
         // rollback (js/net.js): the session runs the game on, correcting it when the others' real
         // inputs arrive. Its events are new ones only; deaths wait until they can't be undone.
@@ -641,9 +653,11 @@
       if (M && M.demo && blink()) { panel(ctx, 230, 450, 180, 24, 0.7); centerText(ctx, 'DEMO - press any key', 454, YELLOW, 'font0'); }
       // round start: the arena's name and a 3, 2, 1 countdown
       if (this.g.startDelay > 0) {
-        const g = this.g, n = Math.ceil(g.startDelay / AB.TPS), frac = (g.startDelay % AB.TPS) / AB.TPS;
+        const g = this.g, n = Math.ceil(g.startDelay / AB.TPS), frac = ((g.startDelay - 1) % AB.TPS + 1) / AB.TPS;    // 1 -> 0 over each number
+        // each number starts as tall as the screen and shrinks about the middle, fading at the end
+        const p = 1 - frac, e = 1 - Math.pow(1 - p, 3);
+        G.titleTextMid(ctx, String(n), 320, 240, 480 - 330 * e, p > 0.75 ? Math.max(0, (1 - p) / 0.25) : 1);
         G.titleText(ctx, AB.levelName(g.level), 320, 200, 52, 560);
-        G.titleText(ctx, String(n), 320, 322, 76 + Math.round(30 * frac), 200, 0.8 + 0.2 * frac);
       }
       if (this.session && this.showNet) {
         const st = AB.netmatch.statsLines(this.netStats);

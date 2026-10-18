@@ -81,13 +81,14 @@
     return c;
   }
   function buildBedrock(image) {
-    if (!image.naturalWidth || Math.abs(image.naturalWidth / image.naturalHeight - 3) > 0.01) throw new Error('Expected three square texture panels');
-    // The generated source pixels are kept intact. Sample into the native grid, then enlarge the art
-    // pixels 2x. All surfaces and break frames are cached once, with no per-frame image processing.
+    if (!image.naturalWidth || image.naturalWidth % 3) throw new Error('Expected three texture panels side by side');
+    // The sheet holds the three panels (grass, bedrock, grass-topped dirt) at the game's own tile
+    // size, 40 x 36 like the original arenas' tiles, so they are drawn 1:1 (the high-resolution
+    // source is output/tilesets/bedrock-textures-source.png). All surfaces and break frames are
+    // cached once, with no per-frame image processing.
     const tile = (panel, block) => {
-      const small = canvas(CW / 2, CH / 2), s = image.naturalWidth / 3;
-      small.getContext('2d').drawImage(image, panel * s, 0, s, image.naturalHeight, 0, 0, small.width, small.height);
-      const c = canvas(CW, CH), x = c.getContext('2d'); x.drawImage(small, 0, 0, CW, CH);
+      const s = image.naturalWidth / 3;
+      const c = canvas(CW, CH), x = c.getContext('2d'); x.drawImage(image, panel * s, 0, s, image.naturalHeight, 0, 0, CW, CH);
       if (block) {
         if (panel === 1) {
           // A stepped stone bevel matches the concept: light catches the top and left edges,

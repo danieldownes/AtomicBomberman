@@ -171,7 +171,13 @@ These are under main menu > Options, next to the original settings.
   seconds.
 * **Intro Movie on Start**: plays the CD's intro movie before the title screen.
 * **Round Start Countdown** (on by default): each round opens with the arena's name and a 3, 2, 1
-  countdown before anyone can move. The loading screen shows the arena's name too.
+  countdown before anyone can move: each number starts screen-high and shrinks away, with a wall
+  slam, and an explosion on "go". The round's music starts after it. The loading screen shows the
+  arena's name too.
+* **Only computer players left** (local and network games, not campaigns): once every human player
+  is out and at least two computer players remain, HURRY sounds, and 3 seconds later the walls
+  close in four times as fast and fill the arena. An AI that wins by knocking out the last human
+  just wins.
   * The lettering copies the style of the original's HURRY!! picture. The CD has no letters in that
     style, so it uses Anton, a free font (SIL Open Font License) embedded in `data/titlefont.js`.
   * In network games the host's setting applies.

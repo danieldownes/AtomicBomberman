@@ -48,10 +48,12 @@ To inspect the files:
   and gets picked, and that a failed texture download falls back to Green Acres' terrain and is
   retried next round. It also renders game/menu/destruction PNG previews into `output/tilesets/`,
   entirely offline. Keep the reference commit in the local Git history when running this check.
-* The Bedrock textures are in `web/img/tilesets/bedrock/textures.png`: three equal square panels
-  (grass, bedrock, grass-topped dirt). The PNG was generated with the built-in imagegen tool and
-  losslessly re-encoded for decoder compatibility. Runtime code in `web/js/tilesets.js` samples
-  the textures onto the game's grid and caches the floor, border, blocks and nine break frames.
+* The Bedrock textures are in `web/img/tilesets/bedrock/textures.png`: three 40 x 36 panels side by
+  side (grass, bedrock, grass-topped dirt), the size of the original arenas' tiles, so the game
+  draws them 1:1 (9 KB). They were box-filtered down from the generated 2172 x 724 sheet in
+  `output/tilesets/bedrock-textures-source.png`, with the colours made more vivid (saturation
+  x1.4, contrast x1.08, brightness x1.04). Runtime code in `web/js/tilesets.js` caches the floor,
+  border, blocks and nine break frames from it.
   The concept sheet and exact generation prompts are in `output/tilesets/`. Rebuilding CD assets
   does not replace these files. For a direct art review, append `?test=1&level=12` to the game
   URL (Bedrock is arena 12, counting from 0).

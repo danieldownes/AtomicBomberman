@@ -1008,8 +1008,8 @@
     }
 
     // ------------------------------------------------------------------ hurry / enclosement
-    // network games (S.aiFinale): once only computer players are left, nobody is watching a fair fight,
-    // so HURRY sounds, and 3 s later the walls close in 4 times as fast and fill the whole arena
+    // S.aiFinale (local and network rounds): once only computer players are left, nobody is watching a
+    // fair fight, so HURRY sounds, and 3 s later the walls close in 4 times as fast and fill the arena
     updateAIFinale() {
       if (!this.S.aiFinale) return;
       if (this.finaleT === undefined) {

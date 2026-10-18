@@ -266,6 +266,23 @@
     ctx.restore();
   };
 
+  // title text whose letters are `h` px tall from top to bottom (not the font size), centred on cx, cy:
+  // so it grows and shrinks about its middle (the 3-2-1 countdown)
+  const inkRatio = {};
+  gfx.titleTextMid = function (ctx, text, cx, cy, h, alpha = 1, maxW = 2000) {
+    if (!(text in inkRatio)) {
+      ctx.save(); ctx.font = titleFont.replace('40px', '100px');
+      const m = ctx.measureText(text);
+      const ink = (m.actualBoundingBoxAscent || 0) + (m.actualBoundingBoxDescent || 0);
+      ctx.restore();
+      if (ink > 0) inkRatio[text] = { r: ink / 100, desc: (m.actualBoundingBoxDescent || 0) / 100 };
+    }
+    const k = inkRatio[text] || { r: 0.72, desc: 0 }, size = h / k.r;
+    // baseline below the middle by half the letters' height (less what hangs below it); the slant
+    // leans the top to the right, so shift left by half of that lean to keep the middle in place
+    gfx.titleText(ctx, text, cx - 0.22 * h / 2, cy + h / 2 - k.desc * size, Math.round(size), maxW, alpha);
+  };
+
   // ---- bitmap fonts (FONT0/1/6.FON) ----
   const F = window.AB_FONTS;
   const fontCache = {};
