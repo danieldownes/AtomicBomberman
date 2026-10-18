@@ -21,7 +21,7 @@ Besides the original game, the port adds:
 * **Child-friendly and uncensored voice presets.**
 * **Idle animations** that were cut from the original.
 * **An extra 8-bit "Classic" arena.**
-* **Selectable Bedrock terrain graphics**, with the original arena graphics kept as the default.
+* **An extra "Bedrock" arena** with new terrain graphics: bedrock walls, grass and breakable dirt.
 * **The CD's intro movie.**
 
 ## Play

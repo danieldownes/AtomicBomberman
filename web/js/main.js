@@ -32,9 +32,6 @@
     msg.textContent = 'Preparing graphics...';
     await AB.gfx.load((f) => { bar.style.width = Math.round(70 + f * 22) + '%'; });
     await AB.gfx.loadTitleFont();
-    // A query override is useful for art review and does not overwrite the saved preference.
-    if (params.has('tileset')) AB.tilesets.override = AB.tilesets.id(params.get('tileset'));
-    await AB.tilesets.load();
     msg.textContent = 'Loading pictures...';
     await AB.gfx.preloadImages(['title', 'mainmenu_port', 'glue0', 'iplogo', 'hslogo']);
     // while the menus are up, fetch the loading pictures and the end-of-round screens in the background

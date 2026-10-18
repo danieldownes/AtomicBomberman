@@ -6,62 +6,6 @@
   const { YELLOW, WHITE, GREY, ORANGE, CYAN } = U;
   const fit = (t, w, font = 'font1') => { t = String(t); if (G.textWidth(t, font) <= w) return t; while (t.length > 1 && G.textWidth(t + '...', font) > w) t = t.slice(0, -1); return t + '...'; };
 
-  // ================================================================= TILESETS
-  SC.register('tilesets', {
-    help: 'options',
-    enter(a) {
-      this.back = (a && a.back) || 'settings';
-      this.backArg = a && a.backArg;
-      this.sel = Math.max(0, AB.tilesets.list.findIndex(d => d.id === AB.tilesets.id()));
-      G.loadImage('field0');
-      AB.tilesets.load();
-    },
-    close() { AB.saveSettings(); SC.go(this.back, this.backArg); },
-    key(k) {
-      const list = AB.tilesets.list;
-      if (k.code === 'ArrowUp') this.sel = (this.sel + list.length) % (list.length + 1);
-      else if (k.code === 'ArrowDown') this.sel = (this.sel + 1) % (list.length + 1);
-      else if (U.isBack(k)) this.close();
-      else if (U.isOK(k) || k.code === 'ArrowLeft' || k.code === 'ArrowRight') {
-        if (this.sel === list.length) { if (U.isOK(k)) this.close(); }
-        else { AB.tilesets.select(list[this.sel].id); A.play(20); }
-      }
-    },
-    tick() {},
-    render(ctx) {
-      const T = AB.tilesets, list = T.list, d = list[this.sel] || list.find(d => d.id === T.id());
-      U.glueDim(ctx, 6);
-      U.panel(ctx, 24, 24, 592, 412, 0.85);
-      U.centerText(ctx, 'ARENA TILESET', 36, YELLOW);
-      G.text(ctx, 'Choose the terrain graphics shown on this computer.', 320, 62, GREY, 'font0', 1);
-      list.forEach((it, i) => {
-        const y = 106 + i * 36;
-        if (this.sel === i) U.menuCursor(ctx, 48, y + 16);
-        U.drawTick(ctx, 66, y, T.id() === it.id ? 2 : 0, this.sel === i);
-        G.text(ctx, it.name, 92, y, this.sel === i ? YELLOW : WHITE, 'font1');
-      });
-      if (this.sel === list.length) U.menuCursor(ctx, 48, 206);
-      G.text(ctx, 'Done', 66, 190, this.sel === list.length ? YELLOW : WHITE, 'font1');
-      d.description.forEach((line, i) => G.text(ctx, line, 54, 234 + i * 16, GREY, 'font0'));
-      T.preview(ctx, 0, 360, 96, 6, 6, d.id);
-      ctx.strokeStyle = 'rgba(248,216,72,0.6)'; ctx.strokeRect(359.5, 95.5, 241, 217);
-      G.text(ctx, d.name, 480, 322, WHITE, 'font1', 1);
-      ['solid', 'brick', 'breaking'].forEach((kind, i) => {
-        const cx = 82 + i * 86, n = T.breakFrames(0, d.id);
-        const state = kind === 'breaking' ? Math.floor(U.frame() / 4) % (n + 6) : 0;
-        if (state < n) T.draw(ctx, 0, kind, state, cx, 332, d.id);
-        G.text(ctx, ['Wall', 'Brick', 'Breaking'][i], cx, 344, GREY, 'font0', 1);
-      });
-      const status = T.status(d.id);
-      if (status === 'loading') G.text(ctx, 'Loading terrain...', 480, 348, CYAN, 'font0', 1);
-      if (status === 'failed') {
-        G.text(ctx, 'Using Original: download failed.', 480, 348, ORANGE, 'font0', 1);
-        G.text(ctx, 'Select again to retry.', 480, 364, GREY, 'font0', 1);
-      }
-      G.text(ctx, 'Up/Down: preview   Enter/Space: select   Esc: back', 320, 412, GREY, 'font0', 1);
-    },
-  });
-
   // ================================================================= ARENAS
   // tick the arenas a match may use; each round picks one of them at random
   const NOTE = { 2: 'left out of random by the original', 6: 'left out of random by the original' };
@@ -89,7 +33,6 @@
       if (k.code === 'ArrowUp') this.sel = (this.sel + rows.length - 1) % rows.length;
       else if (k.code === 'ArrowDown') this.sel = (this.sel + 1) % rows.length;
       else if (U.isBack(k)) this.close();
-      else if (k.code === 'KeyT') SC.go('tilesets', { back: 'arenas', backArg: { back: this.back } });
       else if (U.isOK(k) || k.code === 'ArrowLeft' || k.code === 'ArrowRight') {
         if (row.lvl !== undefined) { S.arenas = Object.assign({}, S.arenas, { [row.lvl]: !AB.arenaOn(S, row.lvl) }); A.play(20); }
         else if (U.isOK(k)) { row.action(); A.play(10); }
@@ -103,8 +46,8 @@
       G.text(ctx, 'Each round is played in one of the ticked arenas.', 320, 58, GREY, 'font0', 1);
       const S = AB.settings, rows = this.rows();
       rows.forEach((row, i) => {
-        const y = 82 + i * 22 + (row.lvl === undefined ? 8 : 0), sel = i === this.sel;
-        if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.16)'; ctx.fillRect(32, y - 3, 300, 22); U.menuCursor(ctx, 48, y + 16); }
+        const y = 78 + i * 20 + (row.lvl === undefined ? 6 : 0), sel = i === this.sel;
+        if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.16)'; ctx.fillRect(32, y - 2, 300, 20); U.menuCursor(ctx, 48, y + 15); }
         let x = 66;
         if (row.lvl !== undefined) { U.drawTick(ctx, x, y, AB.arenaOn(S, row.lvl) ? 2 : 0, sel); x += 22; }
         G.text(ctx, row.label, x, y, sel ? YELLOW : row.lvl !== undefined && !AB.arenaOn(S, row.lvl) ? GREY : WHITE, 'font1');
@@ -115,9 +58,9 @@
       SC.uiLate().arenaPreview(ctx, lvl, 360, 96, 6, 6);
       ctx.strokeStyle = 'rgba(248,216,72,0.6)'; ctx.strokeRect(359.5, 95.5, 241, 217);
       G.text(ctx, AB.levelName(lvl), 480, 322, WHITE, 'font1', 1);
-      const note = lvl === AB.CLASSIC_LEVEL ? 'port addition: 8-bit theme' : NOTE[lvl];
+      const note = lvl === AB.CLASSIC_LEVEL ? 'port addition: 8-bit theme' : lvl === AB.BEDROCK_LEVEL ? 'port addition: new terrain' : NOTE[lvl];
       if (note) G.text(ctx, '(' + note + ')', 480, 344, CYAN, 'font0', 1);
-      G.text(ctx, 'Up/Down: choose   Enter: tick   T: tileset   Esc: back', 320, 412, GREY, 'font0', 1);
+      G.text(ctx, 'Up/Down: choose   Enter/Space: tick   Esc: back', 320, 412, GREY, 'font0', 1);
       if (this.err > 0) { U.panel(ctx, 140, 200, 360, 44, 0.92); U.centerText(ctx, 'Tick at least one arena', 214, ORANGE); }
     },
   });

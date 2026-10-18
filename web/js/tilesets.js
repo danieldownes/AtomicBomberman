@@ -1,81 +1,76 @@
-// Cosmetic arena tilesets. Arena IDs, schemes and simulation state keep their original meaning.
+// Terrain graphics for arenas the port adds on top of the original's: the Bedrock arena draws its
+// floor, border, walls, bricks and crumble from one generated texture sheet (img/tilesets/bedrock/).
+// The arena's rules are those of an ordinary arena; only the pictures differ.
 'use strict';
 (function (AB) {
   const G = AB.gfx, T = AB.tilesets = {};
   const { W, H, CW, CH, OX, OY, COLS, ROWS } = AB;
   const packs = {}, pending = {}, failed = new Set();
   const definitions = [
-    { id: 'original', name: 'Original', description: ['Each arena uses its own', 'original terrain graphics.'] },
-    { id: 'bedrock', name: 'Bedrock', image: 'tilesets/bedrock/textures', description: ['Bedrock walls, grassy floors', 'and breakable dirt blocks.'], build: buildBedrock },
+    { id: 'bedrock', level: () => AB.BEDROCK_LEVEL, image: 'tilesets/bedrock/textures', build: buildBedrock },
   ];
-  T.list = definitions.map(({ id, name, description }) => ({ id, name, description }));
-  T.id = function (id) {
-    if (id === undefined) id = T.override === undefined ? (AB.settings || {}).tileset : T.override;
-    return definitions.some(d => d.id === id) ? id : 'original';
-  };
-  T.name = (id) => definitions.find(d => d.id === T.id(id)).name;
-  T.status = (id) => { id = T.id(id); return id === 'original' || packs[id] ? 'ready' : failed.has(id) ? 'failed' : pending[id] ? 'loading' : 'idle'; };
+  // the texture set an arena uses (null: the arena's own .ANI terrain)
+  const defFor = (level) => definitions.find(d => d.level() === level) || null;
+  // the original arena whose pictures stand in if a set can't be loaded (Bedrock: Green Acres)
+  T.baseLevel = (level) => (defFor(level) ? 0 : level);
+  T.status = (level) => { const d = defFor(level); return !d || packs[d.id] ? 'ready' : failed.has(d.id) ? 'failed' : pending[d.id] ? 'loading' : 'idle'; };
 
-  // New textures load only when requested. A failed pack always falls back to the arena's art.
-  T.load = function (id) {
-    id = T.id(id);
-    if (id === 'original' || packs[id]) return Promise.resolve(true);
-    if (pending[id]) return pending[id];
-    if (failed.has(id)) return Promise.resolve(false);
-    const d = definitions.find(d => d.id === id);
-    pending[id] = G.loadImage(d.image, { priority: 'high', retries: 1 }).then(ok => {
+  // texture sets load only when an arena needs them; a failed one falls back to the base arena's art
+  T.load = function (level) {
+    const d = defFor(level);
+    if (!d || packs[d.id]) return Promise.resolve(true);
+    if (pending[d.id]) return pending[d.id];
+    if (failed.has(d.id)) return Promise.resolve(false);
+    pending[d.id] = G.loadImage(d.image, { priority: 'high', retries: 1 }).then(ok => {
       if (!ok) throw new Error('Texture image unavailable');
-      packs[id] = d.build(G.image(d.image));
+      packs[d.id] = d.build(G.image(d.image));
       return true;
     }).catch(e => {
-      failed.add(id);
-      console.warn('Tileset unavailable; using Original:', id, e.message);
+      failed.add(d.id);
+      console.warn('Arena textures unavailable, using the ' + AB.levelName(0) + ' terrain:', d.id, e.message);
       return false;
-    }).finally(() => { delete pending[id]; });
-    return pending[id];
+    }).finally(() => { delete pending[d.id]; });
+    return pending[d.id];
   };
-  T.select = function (id) {
-    id = T.id(id);
-    delete T.override;
-    AB.settings.tileset = id;
-    AB.saveSettings();
-    failed.delete(id);                    // selecting again also retries a failed download
-    return T.load(id);
-  };
-  T.prepare = function (level, id) {
-    id = T.id(id);
-    return Promise.all([T.load(id), G.loadImage('field' + level, { priority: 'high', retries: 3 })])
-      .then(([loaded, field]) => (id !== 'original' && loaded) || field);
+  // before a round: the arena's textures, and its base arena's field picture as the fallback
+  // (a download that failed earlier is tried again)
+  T.prepare = function (level) {
+    const d = defFor(level);
+    if (d && !packs[d.id]) failed.delete(d.id);
+    return Promise.all([T.load(level), G.loadImage('field' + T.baseLevel(level), { priority: 'high', retries: 3 })])
+      .then(([loaded, field]) => (defFor(level) && loaded) || field);
   };
 
-  function pack(id) { return packs[T.id(id)]; }
-  T.field = (level, id) => { const p = pack(id); return p ? p.field : G.image('field' + level); };
-  T.drawField = function (ctx, level, id) {
-    const f = T.field(level, id);
+  function pack(level) { const d = defFor(level); return d ? packs[d.id] : null; }
+  T.field = (level) => { const p = pack(level); return p ? p.field : G.image('field' + T.baseLevel(level)); };
+  T.drawField = function (ctx, level) {
+    const f = T.field(level);
     if (f.width && (f.complete === undefined || f.naturalWidth)) ctx.drawImage(f, 0, 0);
   };
-  T.breakFrames = (level, id) => { const p = pack(id); return p ? p.breaking.length : G.seqLen('flame brick ' + level) || 9; };
+  T.breakFrames = (level) => { const p = pack(level); return p ? p.breaking.length : G.seqLen('flame brick ' + T.baseLevel(level)) || 9; };
   // x/y are the same bottom-centre hotspots used by the original .ANI terrain sequences.
-  T.draw = function (ctx, level, kind, state, x, y, id) {
-    const p = pack(id);
+  T.draw = function (ctx, level, kind, state, x, y) {
+    const p = pack(level);
     if (p) {
       const im = kind === 'breaking' ? p.breaking[AB.clamp(state | 0, 0, p.breaking.length - 1)] : p[kind];
       ctx.drawImage(im, Math.round(x - CW / 2), Math.round(y - CH + 1));
     } else {
-      const seq = kind === 'breaking' ? 'flame brick ' + level : 'tile ' + level + ' ' + kind;
+      const b = T.baseLevel(level);
+      const seq = kind === 'breaking' ? 'flame brick ' + b : 'tile ' + b + ' ' + kind;
       G.draw(ctx, seq, state, x, y, -1, false);
     }
   };
-  T.preview = function (ctx, level, px, py, nx = 5, ny = 5, id) {
-    T.load(id);
+  // a corner of the arena with the current scheme's blocks (menus)
+  T.preview = function (ctx, level, px, py, nx = 5, ny = 5) {
+    T.load(level);
     const sc = window.AB_DATA.schemes[AB.settings.scheme] || window.AB_DATA.schemes.basic;
     ctx.save();
     ctx.beginPath(); ctx.rect(px, py, nx * CW, ny * CH); ctx.clip();
-    const f = T.field(level, id);
+    const f = T.field(level);
     if (f.width && (f.complete === undefined || f.naturalWidth)) ctx.drawImage(f, OX, OY, nx * CW, ny * CH, px, py, nx * CW, ny * CH);
     for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
       const ch = (sc.rows[y] || '')[x];
-      if (ch === '#' || ch === ':') T.draw(ctx, level, ch === '#' ? 'solid' : 'brick', 0, px + x * CW + CW / 2, py + y * CH + CH - 1, id);
+      if (ch === '#' || ch === ':') T.draw(ctx, level, ch === '#' ? 'solid' : 'brick', 0, px + x * CW + CW / 2, py + y * CH + CH - 1);
     }
     ctx.restore();
   };

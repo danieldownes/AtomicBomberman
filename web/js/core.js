@@ -105,14 +105,17 @@ window.AB = window.AB || {};
                   'Swap', 'Reversed Controls', 'Leprosy', 'Invisible', 'Duds'];
 
   // ---- levels (MESSAGES.TXT 150..160) ----
-  // the port adds a 12th arena, "Classic", after the original eleven (8-bit theme, js/render.js)
+  // the port adds two arenas after the original eleven: "Classic" (8-bit theme, js/render.js) and
+  // "Bedrock" (new terrain textures, js/tilesets.js). Both play like an ordinary arena.
   AB.CLASSIC_LEVEL = AB.val(35, 11);
-  AB.LEVELS = AB.CLASSIC_LEVEL + 1;
-  AB.levelName = (n) => (n === AB.CLASSIC_LEVEL ? 'Classic (8-bit)' : AB.msg(150 + n, 'Level ' + n));
-  AB.LEVEL_MUSIC = ['grnacres', 'generic', 'hockey', 'pyramid', 'mineshft', 'battle', 'gieger', 'haunted', 'ocean', 'swamp', 'sewer', 'classic'];
+  AB.BEDROCK_LEVEL = AB.CLASSIC_LEVEL + 1;
+  AB.LEVELS = AB.BEDROCK_LEVEL + 1;
+  AB.levelName = (n) => (n === AB.CLASSIC_LEVEL ? 'Classic (8-bit)' : n === AB.BEDROCK_LEVEL ? 'Bedrock' : AB.msg(150 + n, 'Level ' + n));
+  // (Bedrock has no music of its own: it borrows the Mine Shaft track)
+  AB.LEVEL_MUSIC = ['grnacres', 'generic', 'hockey', 'pyramid', 'mineshft', 'battle', 'gieger', 'haunted', 'ocean', 'swamp', 'sewer', 'classic', 'mineshft'];
   // tracks that can be ticked for gameplay (Options > Gameplay Music); the menu/title themes are
   // off by default, the short jingles (win/lose/draw/network) are not offered
-  AB.MUSIC_TRACKS = AB.LEVEL_MUSIC.map((t, i) => ({ id: t, name: AB.levelName(i), on: true }))
+  AB.MUSIC_TRACKS = AB.LEVEL_MUSIC.map((t, i) => ({ id: t, name: AB.levelName(i), on: true })).filter((t, i, a) => a.findIndex(u => u.id === t.id) === i)
     .concat([{ id: 'title', name: 'Title Theme', on: false }, { id: 'menu', name: 'Menu Theme', on: false }]);
   AB.trackOn = (S, id) => {
     const m = S.gameMusic || {};
@@ -151,7 +154,6 @@ window.AB = window.AB || {};
       musicOrder: 'level',                  // level = each level's own track, shuffle = any ticked track
       winsNeeded: AB.val(310, 2),
       enhancedGfx: true,                    // soft sprite edges / glowing flames (port addition)
-      tileset: 'original',                  // local cosmetic preference; never changes arena rules
       idleAnims: true,                      // play the unused idle animations when a player stands still
       playIntro: true,                      // the intro movie from the CD (INTRO/BMINTRO.EXE) on start
       smoothScaling: false,                 // bilinear screen scaling instead of sharp pixels
@@ -165,7 +167,7 @@ window.AB = window.AB || {};
   AB.PLAY_TIMES = [60, 90, 120, 150, 180, 240, 300, 600, 0];
   // arenas a round may use: the original picks randomly among those with VALUELST #1150+n = 1 (it leaves
   // out the Hockey Rink and Aliens); the Arenas menu lets the player tick any set, including those two
-  AB.arenaDefault = (i) => (i === AB.CLASSIC_LEVEL ? true : !!AB.val(1150 + i, 1));
+  AB.arenaDefault = (i) => (i >= AB.CLASSIC_LEVEL ? true : !!AB.val(1150 + i, 1));
   AB.arenaOn = (S, i) => { const a = S.arenas || {}; return i in a ? !!a[i] : AB.arenaDefault(i); };
   AB.pickArena = function (S) {
     const ok = []; for (let i = 0; i < AB.LEVELS; i++) if (AB.arenaOn(S, i)) ok.push(i);

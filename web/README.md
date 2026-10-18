@@ -111,6 +111,10 @@ of the ticked ones.
 * *Classic (8-bit)* is an extra arena added by the port. It uses the NES-style bombermen and
   power-up icons found unused on the CD (CLASSICS.ANI). Its tiles, bricks, bombs, flames, floor
   and chiptune music are new, made for this port.
+* *Bedrock* is a second extra arena: bedrock walls, grass floors and breakable grass-topped dirt
+  that crumbles in nine frames, new generated pixel art. It plays like Green Acres, uses the Mine
+  Shaft music, and its textures load the first time it comes up. If they can't be downloaded, that
+  round uses Green Acres' terrain and the next one tries again.
 
 ## Schemes
 
@@ -177,16 +181,6 @@ These are under main menu > Options, next to the original settings.
   * *Original*: the hard colour key, as shipped. The data has no alpha channel.
 * **Screen Scaling**: sharp pixels or smooth (bilinear) scaling.
 
-* **Arena Tileset** opens a live preview of the terrain styles. **Original** (the default) keeps
-  each arena's existing floor, border, blocks and destruction. **Bedrock** uses Minecraft-inspired
-  bedrock walls, grass floors and breakable grass-topped dirt, with a nine-frame crumble animation.
-  Select with Enter/Space; browsing previews does not change your selection. The same picker is
-  available under Start Game > Arena & Match > Tileset, or with T in the Arenas list.
-  The choice is saved on this computer and applies to local, campaign and network games. Arena
-  rules, layouts, characters, bombs and effects keep their existing behavior. Online players may
-  choose different tilesets. Bedrock's textures load on demand, with Original as the fallback if
-  the download fails; select Bedrock again to retry.
-
 ## What's in here
 
 ```
@@ -198,7 +192,7 @@ js/render.js        drawing with the original sprites
 js/screens.js       menus, results, victory, roulette, online manual, credits, intro movie
 js/screens2.js      Sounds & Voices browser, Arenas, Campaign Mode
 js/gfx.js, audio.js, input.js
-js/tilesets.js      cosmetic terrain registry, loading, previews and cached Bedrock rendering
+js/tilesets.js      the Bedrock arena's terrain: loading, previews and cached rendering
 js/net.js           rollback session: prediction, re-simulation, time sync, checksums, drop-outs (see NETWORK.md)
 js/netplay.js       network rooms over PeerJS/WebRTC: hosting, joining, pings, relaying
 js/netscreens.js    the network lobby and room screens, and the match controller
@@ -212,7 +206,7 @@ data/sounds.js      sound catalog: game events -> phrases -> takes, with flags f
 data/fonts.js       FONT0/1/6.FON
 data/titlefont.js   the Anton font (OFL, licence in data/titlefont.LICENSE.txt) for arena names and the countdown
 img/                every .PCX picture as PNG, mainmenu_port.png (relabelled menu), field11.png (Classic)
-img/tilesets/       optional terrain textures (Bedrock is new generated pixel art)
+img/tilesets/       terrain textures for the Bedrock arena (new generated pixel art)
 audio/music/        the 17 music tracks, plus classic.mp3 (new)
 audio/clips/        all 2,010 sound clips from the CD, one small script each, loaded when needed
 intro/              the CD's intro movie, re-encoded (WebM, with MP4 as a fallback)

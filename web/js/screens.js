@@ -363,13 +363,12 @@
   }
   SC.register('options', {
     help: 'options',
-    enter() { this.sel = 5; },
+    enter() { this.sel = 4; },
     items() {
       const S = AB.settings;
       return [
         { label: 'Arenas', value: arenaSummary(S) + '  >', action: () => SC.go('arenas') },
         { label: 'Schemes', value: AB.schemeSummary(S) + '  >', action: () => SC.go('schemes', { back: 'options' }) },
-        { label: 'Tileset', value: AB.tilesets.name() + '  >', action: () => SC.go('tilesets', { back: 'options' }) },
         { label: 'Match', value: AB.msg(211, '%u %s to win match').replace('%u', S.winsNeeded).replace('%s', S.winByKills ? AB.msg(209, 'Kills') : AB.msg(208, 'Wins')),
           change: (d) => { S.winsNeeded = AB.clamp(S.winsNeeded + d, 1, S.winByKills ? 50 : 9); } },
         { label: 'Play Time', value: fmtTime(S.playTime),
@@ -443,7 +442,7 @@
       // needed before the round can start: the arena picture (high priority) and the sound effects;
       // the voices get a few more seconds, then go on loading during the round
       this.img = a.level === undefined; this.fx = false; this.all = false;
-      const field = a.level !== undefined ? AB.tilesets.prepare(a.level) : AB.tilesets.load();
+      const field = a.level !== undefined ? AB.tilesets.prepare(a.level) : Promise.resolve(true);
       field.then(() => { this.img = true; });
       const snd = A.newRound((f) => { this.prog = f; });
       snd.effects.then(() => { this.fx = true; });
@@ -894,7 +893,6 @@
         { label: AB.msg(262, 'Lost net players revert to AIs: %s').replace('%s', yesno(S.lostNetToAI)), change: () => { S.lostNetToAI = !S.lostNetToAI; } },
         { label: `Gameplay Music: ${musicSummary(S)}`, action: () => SC.go('music') },
         { label: `Sounds & Voices: ${(A.PRESET_LABEL[A.preset()] || A.preset()) + (A.isCustom() ? ', customised' : '')}  >`, action: () => SC.go('sounds') },
-        { label: `Arena Tileset: ${AB.tilesets.name()}  >`, action: () => SC.go('tilesets', { back: 'settings' }) },
         { label: `Graphics: ${S.enhancedGfx !== false ? 'Enhanced (soft edges, glowing flames)' : 'Original (hard colour key)'}`, change: () => { S.enhancedGfx = S.enhancedGfx === false; AB.applyDisplay(); } },
         { label: `Screen Scaling: ${S.smoothScaling ? 'Smooth' : 'Sharp pixels'}`, change: () => { S.smoothScaling = !S.smoothScaling; AB.applyDisplay(); } },
         { label: `Idle Animations: ${S.idleAnims !== false ? 'On (unused CD animations)' : 'Off'}`, change: () => { S.idleAnims = S.idleAnims === false; } },
