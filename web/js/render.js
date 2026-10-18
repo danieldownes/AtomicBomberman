@@ -21,8 +21,7 @@
   Rn.draw = function (ctx, g, t) {
     const lvl = g.level;
     classic = lvl === AB.CLASSIC_LEVEL;
-    G.blit(ctx, 'field' + lvl, 0, 0);
-    const solid = 'tile ' + lvl + ' solid', brick = 'tile ' + lvl + ' brick', bricky = 'flame brick ' + lvl;
+    AB.tilesets.drawField(ctx, lvl);
     // floor extras
     for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
       const e = g.extras[idx(x, y)];
@@ -39,11 +38,11 @@
     for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
       const i = idx(x, y), tt = g.tiles[i];
       if (g.brickT[i] > 0) {
-        const n = G.seqLen(bricky) || 9;
+        const n = AB.tilesets.breakFrames(lvl);
         const st = Math.min(n - 1, Math.floor((AB.K.BRICK - g.brickT[i]) * n / AB.K.BRICK));
-        G.draw(ctx, bricky, st, bottomX(x), bottomY(y), -1, false);
-      } else if (tt === 1) G.draw(ctx, solid, 0, bottomX(x), bottomY(y), -1, false);
-      else if (tt === 2) G.draw(ctx, brick, 0, bottomX(x), bottomY(y), -1, false);
+        AB.tilesets.draw(ctx, lvl, 'breaking', st, bottomX(x), bottomY(y));
+      } else if (tt === 1) AB.tilesets.draw(ctx, lvl, 'solid', 0, bottomX(x), bottomY(y));
+      else if (tt === 2) AB.tilesets.draw(ctx, lvl, 'brick', 0, bottomX(x), bottomY(y));
     }
     // powerups on the floor
     for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {

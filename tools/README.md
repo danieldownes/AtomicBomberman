@@ -42,6 +42,19 @@ About the voice files:
 
 To inspect the files:
 
+* `node tools/test_tilesets.cjs` (from the repository root, with `@napi-rs/canvas` available to
+  Node) checks Original against the renderer in commit `c77e4b4`, compares the complete simulation
+  state under both cosmetics, and checks selection, persistence and loading failures. It also
+  renders game/menu/destruction PNG previews into `output/tilesets/`, entirely offline. Keep the
+  reference commit in the local Git history when running this check.
+* The Bedrock textures are in `web/img/tilesets/bedrock/textures.png`: three equal square panels
+  (grass, bedrock, grass-topped dirt). The PNG was generated with the built-in imagegen tool and
+  losslessly re-encoded for decoder compatibility. Runtime code in `web/js/tilesets.js` samples
+  the textures onto the game's grid and caches the floor, border, blocks and nine break frames.
+  The concept sheet and exact generation prompts are in `output/tilesets/`. Rebuilding CD assets
+  does not replace these files. For a direct art review, append `?test=1&tileset=bedrock&level=0`
+  to the game URL; this override does not replace the saved tileset preference.
+
 * `anidump.py` / `aniseq.py <file.ani>` dump the chunk and sequence structure of an `.ANI` file.
 * `anilib.py` is the `.ANI` decoder: `CHFILEANI` header, `FRAM`/`CIMG` 16-bit RLE images, and
   `SEQ`/`STAT` sequences.

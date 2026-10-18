@@ -359,26 +359,17 @@
   }
   // sample blocks preview (#730: x, y, 5 x 5 blocks) drawn with the arena's own tiles
   function arenaPreview(ctx, lvl, px, py, nx = 5, ny = 5) {
-    const sc = window.AB_DATA.schemes[AB.settings.scheme] || window.AB_DATA.schemes.basic;
-    ctx.save();
-    ctx.beginPath(); ctx.rect(px, py, nx * AB.CW, ny * AB.CH); ctx.clip();
-    const fld = G.image('field' + lvl);
-    if (fld.complete && fld.naturalWidth) ctx.drawImage(fld, AB.OX, AB.OY, nx * AB.CW, ny * AB.CH, px, py, nx * AB.CW, ny * AB.CH);
-    for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
-      const ch = sc.rows[y][x];
-      if (ch === '#') G.draw(ctx, 'tile ' + lvl + ' solid', 0, px + x * AB.CW + 20, py + y * AB.CH + 35, -1, false);
-      else if (ch === ':') G.draw(ctx, 'tile ' + lvl + ' brick', 0, px + x * AB.CW + 20, py + y * AB.CH + 35, -1, false);
-    }
-    ctx.restore();
+    AB.tilesets.preview(ctx, lvl, px, py, nx, ny);
   }
   SC.register('options', {
     help: 'options',
-    enter() { this.sel = 4; },
+    enter() { this.sel = 5; },
     items() {
       const S = AB.settings;
       return [
         { label: 'Arenas', value: arenaSummary(S) + '  >', action: () => SC.go('arenas') },
         { label: 'Schemes', value: AB.schemeSummary(S) + '  >', action: () => SC.go('schemes', { back: 'options' }) },
+        { label: 'Tileset', value: AB.tilesets.name() + '  >', action: () => SC.go('tilesets', { back: 'options' }) },
         { label: 'Match', value: AB.msg(211, '%u %s to win match').replace('%u', S.winsNeeded).replace('%s', S.winByKills ? AB.msg(209, 'Kills') : AB.msg(208, 'Wins')),
           change: (d) => { S.winsNeeded = AB.clamp(S.winsNeeded + d, 1, S.winByKills ? 50 : 9); } },
         { label: 'Play Time', value: fmtTime(S.playTime),
@@ -452,7 +443,7 @@
       // needed before the round can start: the arena picture (high priority) and the sound effects;
       // the voices get a few more seconds, then go on loading during the round
       this.img = a.level === undefined; this.fx = false; this.all = false;
-      const field = a.level !== undefined ? G.loadImage('field' + a.level, { priority: 'high', retries: 3 }) : Promise.resolve(true);
+      const field = a.level !== undefined ? AB.tilesets.prepare(a.level) : AB.tilesets.load();
       field.then(() => { this.img = true; });
       const snd = A.newRound((f) => { this.prog = f; });
       snd.effects.then(() => { this.fx = true; });
@@ -903,6 +894,7 @@
         { label: AB.msg(262, 'Lost net players revert to AIs: %s').replace('%s', yesno(S.lostNetToAI)), change: () => { S.lostNetToAI = !S.lostNetToAI; } },
         { label: `Gameplay Music: ${musicSummary(S)}`, action: () => SC.go('music') },
         { label: `Sounds & Voices: ${(A.PRESET_LABEL[A.preset()] || A.preset()) + (A.isCustom() ? ', customised' : '')}  >`, action: () => SC.go('sounds') },
+        { label: `Arena Tileset: ${AB.tilesets.name()}  >`, action: () => SC.go('tilesets', { back: 'settings' }) },
         { label: `Graphics: ${S.enhancedGfx !== false ? 'Enhanced (soft edges, glowing flames)' : 'Original (hard colour key)'}`, change: () => { S.enhancedGfx = S.enhancedGfx === false; AB.applyDisplay(); } },
         { label: `Screen Scaling: ${S.smoothScaling ? 'Smooth' : 'Sharp pixels'}`, change: () => { S.smoothScaling = !S.smoothScaling; AB.applyDisplay(); } },
         { label: `Idle Animations: ${S.idleAnims !== false ? 'On (unused CD animations)' : 'Off'}`, change: () => { S.idleAnims = S.idleAnims === false; } },

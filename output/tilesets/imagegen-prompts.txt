@@ -1,0 +1,24 @@
+Built-in imagegen prompts. Generated texture pixels are preserved; the PNG is losslessly re-encoded for decoder compatibility, then sampled and composed by the game at runtime.
+
+CONCEPT PREVIEW
+Use case: stylized-concept.
+Asset type: preview of a new 2D arena tileset for the existing Atomic Bomberman HTML5 game.
+Primary request: a Minecraft Bedrock-style pixel-art arena tileset presentation, faithful to Minecraft's recognizable chunky low-resolution block textures, adapted to Bomberman's straight overhead rectangular grid. This is an art direction preview, NOT a perspective scene or a finished game screenshot.
+
+Make one polished landscape reference sheet, approximately 1536 by 1024. Use a restrained near-black presentation background, a large clear arena preview on the left taking about 70% of the width, a tidy material key on the right, and a destruction animation strip below. The arena itself should be a flat 640x480-style game composition with exactly 15 columns and 11 rows of subtly rectangular cells (40 pixels wide by 36 pixels high), with a quiet dark stone HUD surround above it and a bedrock border. Arena origin is (20,64) in the 640x480 composition. Maze walls stand at alternating grid intersections. Include many passable grass corridors, several small cleared starting areas, and a scattering of breakable dirt blocks filling portions of the corridors.
+
+Art direction: original pixel art inspired by Minecraft Bedrock. Solid indestructible walls are charcoal and slate gray bedrock with distinctive coarse irregular dark and light rock patches. Breakable blocks are rich warm brown dirt blocks with small tan pebbles and a bright grassy green top lip, very clearly different from bedrock. The walkable floor is muted darker grass-green with very sparse square-pixel texture and subtle variation; keep the floor quieter and lower contrast than blocks. Tiny top-edge highlights and a short dark front face give restrained depth while all footprints stay square to the overhead grid. Clear readable silhouettes, crisp square pixels, nearest-neighbor character, limited palette, consistent lighting from upper left, no blur or smooth gradients.
+
+On the right show enlarged isolated pixel-art swatches labeled exactly 'FLOOR', 'BEDROCK', and 'BREAKABLE'. At the bottom show a row of nine consistent frames of the same dirt block breaking: intact, cracking, splitting, crumbling into chunky brown and green fragments, then disappearing to reveal grass; label this strip 'DESTRUCTION / 0.5 SEC'. Heading text exactly 'BEDROCK' and a small subtitle 'Arena tileset preview'. Keep graphic-design text clean, understated and legible.
+
+Constraints: terrain and tiles only. No characters, monsters, bombs, pickups, logos, watermarks, official Minecraft title branding, invented gameplay UI, 3D isometric angles, tilted camera, cinematic scenery, photorealism, glossy rendering, voxel panoramas, or particles spilling far into neighboring cells. Preserve an honest usable Bomberman arena layout with non-square 40x36 cells.
+
+PRODUCTION TEXTURES
+Use case: stylized-concept.
+Asset type: production pixel-art texture atlas for a 2D Bomberman game.
+Create one very wide 3:1 image, exactly 1536 pixels wide and 512 pixels tall. Fill the entire image with exactly three adjoining square texture panels, no gutters, no margins, no borders, no text, no diagrams, no presentation decoration. Left panel x=0..511: grass floor. Middle panel x=512..1023: bedrock wall. Right panel x=1024..1535: breakable grass-topped dirt block front.
+
+All three panels MUST be genuine coarse low-resolution pixel art: exactly 16 by 16 large square pixel cells per panel, each art pixel enlarged to 32 by 32 output pixels, flat solid colors inside each pixel, crisp hard right-angled edges, no fine detail below that pixel grid, no antialiasing, no gradients. The three panels are source textures and must be completely opaque and fill their square edge to edge.
+
+Minecraft Bedrock-inspired materials. Left: subdued medium dark grass greens, low contrast sparse green mottling, seamless tiling at all four edges, no bevel or outline. Middle: recognizable Minecraft-style bedrock with irregular chunky angular mottling in charcoal, slate and gray; mostly dark, fewer lighter flecks; no green. Right: warm earthy brown dirt with occasional small tan and dark brown square flecks, topped with a vivid grassy green edge occupying only the top 3 pixel rows; the grass lower edge has a few square hanging tufts of varying height, dirt fills all remaining lower rows. No exposed 3D top face, no perspective. All materials are flat straight-on textures. Match the pixel style of the already-generated Bedrock arena concept in this conversation.
+Avoid any text, HUD, characters, items, multiple example blocks, gaps, white background, rounded shapes, smooth gradients, photographic texture, realistic lighting, 3D cubes or isometric camera.
