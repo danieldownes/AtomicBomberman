@@ -26,8 +26,9 @@
     '   room joins it. A room that is playing opens again when its',
     '   match is over.',
     ' - Players here: Enter picks the keyboards and joysticks your',
-    '   computer brings, up to four, and the colour of each player. If two',
-    '   players want the same colour, the one who joined first keeps it.',
+    '   computer brings, up to four, and the name and colour of each.',
+    '   If two players want the same colour, the one who joined first',
+    '   keeps it.',
     '',
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     'The room',
@@ -61,7 +62,10 @@
     '   the walls close in four times as fast, all the way.',
     ' - If a computer leaves, its players carry on as computer',
     '   players ("Lost net players revert to AIs" in Options) or drop',
-    '   out. If the host leaves, the room closes.',
+    '   out, and a message says so at the top. That computer can come',
+    '   back: the room says "Enter: rejoin" in its lobby, and its players',
+    '   (with their scores) are back from the next round. If the host',
+    '   leaves, the room closes.',
     '',
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     'Connections',
@@ -91,9 +95,18 @@
         else { NM.reset(); SC.go('room'); }
         break;
       case 'ready': NM.checkGo(); break;
-      case 'memberLost': NM.memberLost(ev.member); break;
+      case 'memberLost': NM.memberLost(ev.member, ev.why); break;
+      case 'rejoined': {
+        const text = ev.member.name + ' is back, and plays again from the next round.';
+        NM.say(text); NP.send({ t: 'notice', text });
+        break;
+      }
+      case 'notice': if (typeof ev.text === 'string') NM.say(ev.text.slice(0, 160)); break;
       case 'nudge': NM.gotNudge(ev); break;
-      case 'hostLost': NM.notice = 'The host left, so the room has closed.'; NM.reset(); SC.go('network'); break;
+      case 'hostLost':
+        // (either the host went, or this computer's connection did: then the match may still be on)
+        NM.notice = NM.cfg ? 'Lost the connection to the room. If its match is still on, you can rejoin it here.' : 'The host left, so the room has closed.';
+        NM.reset(); SC.go('network'); break;
     }
   });
   NM.pending = [];
@@ -110,7 +123,24 @@
   };
   NM.reset = function () { NM.nudges = {}; NM.session = null; NM.cfg = null; NM.pending = []; NM.goRound = 0; NM.myReady = 0; NM.forfeitSlots = null; if (AB.match && AB.match.net) AB.match = null; };
   // a drop may arrive before this computer has started the round it belongs to: keep it until then
+  // a message over the top of the game (or results) screen for a few seconds: who dropped out, who's back
+  NM.banner = null;
+  NM.say = function (text) { NM.banner = { text, at: performance.now() }; };
+  NM.drawBanner = function (ctx) {
+    const b = NM.banner; if (!b) return;
+    const age = (performance.now() - b.at) / 1000;
+    if (age > 8) { NM.banner = null; return; }
+    ctx.save(); ctx.globalAlpha = Math.min(1, (8 - age) / 0.8);
+    ctx.fillStyle = 'rgba(20,10,0,0.9)'; ctx.fillRect(0, 0, 640, 44);
+    ctx.fillStyle = ORANGE; ctx.fillRect(0, 43, 640, 1);
+    // up to two lines of font0
+    const words = b.text.split(' '), lines = [''];
+    for (const w of words) { const t = lines[lines.length - 1] ? lines[lines.length - 1] + ' ' + w : w; if (G.textWidth(t, 'font0') > 600 && lines[lines.length - 1]) lines.push(w); else lines[lines.length - 1] = t; }
+    lines.slice(0, 2).forEach((l, i) => G.text(ctx, l, 320, (lines.length > 1 ? 9 : 16) + i * 15, i ? WHITE : YELLOW, 'font0', 1));
+    ctx.restore();
+  };
   NM.applyDrop = function (d) {
+    if (d.name) NM.say(dropText(d.name, d.why));
     if (NM.session && NM.cfg && NM.cfg.round === d.round) NM.session.drop(d.c, d.from, d.fill);
     else NM.pending.push(d);
   };
@@ -118,6 +148,8 @@
   NM.hostStart = function (round) {
     const prev = NM.cfg && NM.cfg.players;
     const cfg = NP.makeRound(round, prev);
+    // the scores so far, for a computer that rejoins mid-match
+    if (AB.match && AB.match.net && round > 1) cfg.score = { wins: AB.match.wins, kills: AB.match.kills };
     NP.setState('playing');
     NP.send({ t: 'start', cfg });
     NM.start(cfg);
@@ -128,11 +160,12 @@
     if (cfg.round === 1) { NM.goRound = 0; NM.myReady = 0; }     // a new match: nothing carried over
     const S = Object.assign({}, AB.settings, cfg.sim);
     const M = AB.match = first ? { net: true, wins: {}, kills: {}, round: 0, players: [], demo: false } : AB.match;
+    if (first && cfg.score) { M.wins = Object.assign({}, cfg.score.wins); M.kills = Object.assign({}, cfg.score.kills); }
     M.round = cfg.round; M.S = S; M.over = false;
     M.players = cfg.players.map(p => Object.assign({}, p, { control: p.ai ? 'ai' : p.owner === me ? p.control : 'net' }));
     NM.cfg = cfg; NM.session = null; NM.nudges = {};
     for (const m of (NP.room ? NP.room.members : [])) m.ready = false;
-    SC.go('glue', { level: cfg.level, net: cfg.round, then: () => SC.go('game', { net: cfg }) });
+    SC.go('glue', { level: cfg.level, scheme: cfg.sim.scheme, net: cfg.round, then: () => SC.go('game', { net: cfg }) });
   };
   // after loading: tell the host; the host starts everyone together once all are loaded (or after 12 s)
   NM.ready = function (round) {
@@ -162,14 +195,17 @@
   // host: a computer left mid-round -> from the tick after the last input of it the host has, its players
   // are computer players (or out), on every computer. The host's copy of its last inputs goes along, so
   // everyone plays the same ticks with the same inputs up to there.
-  NM.memberLost = function (member) {
+  const dropText = (name, why) => `${name} ${why === 'timeout' ? 'lost connection' : 'left'}. ` +
+    ((NM.cfg && NM.cfg.sim.lostNetToAI) ? 'Their players carry on as computer players' : 'Their players are out') +
+    `; ${name} can rejoin from the lobby and play again from the next round.`;
+  NM.memberLost = function (member, why) {
     const cfg = NM.cfg;
     if (!cfg) return;
     const c = cfg.computers.indexOf(member.id);
     if (c <= 0) return;
     const s = NM.session && NM.session.round === (cfg.round & 255) ? NM.session : null;
     const from = s ? s.contig[c] + 1 : 1;
-    const d = { t: 'drop', round: cfg.round, c, from, fill: s ? s.fillFor(c) : null };
+    const d = { t: 'drop', round: cfg.round, c, from, fill: s ? s.fillFor(c) : null, name: member.name, why };
     NP.send(d);
     NM.applyDrop(d);
   };
@@ -367,9 +403,10 @@
           else if (r.state === 'empty' || !info) { line1 = 'Empty - press Enter to host it'; col = CYAN; }
           else {
             const n = info.members.reduce((a, m) => a + m.players.length, 0) + (info.ais || 0);
-            line1 = (info.state === 'playing' ? 'Playing' : 'Waiting for players') + `  -  ${n} player${n === 1 ? '' : 's'} on ${info.members.length} computer${info.members.length === 1 ? '' : 's'}`;
+            const back = info.state === 'playing' && Array.isArray(info.rejoin) && info.rejoin.includes(NP.cidTag(NP.clientId()));
+            line1 = (info.state === 'playing' ? 'Playing' : 'Waiting for players') + `  -  ${n} player${n === 1 ? '' : 's'} on ${info.members.length} computer${info.members.length === 1 ? '' : 's'}` + (back ? '  -  Enter: rejoin' : '');
             line2 = 'Host: ' + info.hostName + '     ' + info.members.slice(1).map(m => m.name + ' ' + m.ping + ' ms').join(', ');
-            col = info.state === 'playing' ? ORANGE : GREEN;
+            col = back ? CYAN : info.state === 'playing' ? ORANGE : GREEN;
           }
           const clash = info && NP.versionClash(info.commit);
           G.text(ctx, line1, 170, y + 1, col, 'font0');
@@ -388,21 +425,41 @@
   // like the local Player Setup, for the (up to four) players this computer brings to a network game
   SC.register('netlocal', {
     help: 'portnet',
+    get textEntry() { return this.editing !== null; },
     enter() {
       const cur = NP.localControls();
       this.list = [0, 1, 2, 3].map(i => cur[i] || 'off');
       this.cols = NP.localColours().slice();
-      this.sel = 0; this.err = null; this.errT = 0;
+      // own names, in the same order as the players that are on ('' = the computer's name)
+      const own = Array.isArray(AB.settings.netNames) ? AB.settings.netNames : [];
+      this.names = [0, 1, 2, 3].map(i => (typeof own[i] === 'string' ? own[i] : ''));
+      this.sel = 0; this.err = null; this.errT = 0; this.editing = null;
     },
     opts() { return SC.uiLate().controlOptions().filter(c => c !== 'ai'); },
-    // each player has a control row, and a colour row while it's on
-    rows() { const r = []; this.list.forEach((c, i) => { r.push({ k: 'ctl', i }); if (c !== 'off') r.push({ k: 'col', i }); }); return r; },
+    // each player has a control row, and a name and a colour row while it's on
+    rows() { const r = []; this.list.forEach((c, i) => { r.push({ k: 'ctl', i }); if (c !== 'off') r.push({ k: 'name', i }, { k: 'col', i }); }); return r; },
+    // the name a player gets: their own, or the computer's (numbered among the players that are on)
+    shownName(i) {
+      if (this.names[i].trim()) return this.names[i].trim();
+      const on = this.list.filter(c => c !== 'off').length, n = this.list.slice(0, i).filter(c => c !== 'off').length;
+      return NP.defaultPlayerName(n, on);
+    },
     key(k) {
       const o = this.opts(), rows = this.rows();
       this.sel = Math.min(this.sel, rows.length - 1);
       const row = rows[this.sel];
+      // typing a player's name: Enter or Esc ends it (an empty name means the computer's name again)
+      if (this.editing !== null) {
+        const i = this.editing;
+        if (k.code === 'Enter' || k.code === 'Escape' || k.code === 'NumpadEnter') { this.names[i] = this.names[i].trim(); this.editing = null; A.play(10); }
+        else if (k.code === 'Backspace') this.names[i] = this.names[i].slice(0, -1);
+        else if (k.key && k.key.length === 1 && this.names[i].length < 16 && /[\w .!'-]/.test(k.key)) this.names[i] += k.key;
+        return;
+      }
+      if (row.k === 'name' && U.isOK(k) && k.pad === undefined) { this.editing = row.i; if (!this.names[row.i]) this.names[row.i] = this.shownName(row.i); A.play(10); return; }
       if (k.code === 'ArrowUp') { this.sel = (this.sel + rows.length - 1) % rows.length; A.play(20); }
       else if (k.code === 'ArrowDown') { this.sel = (this.sel + 1) % rows.length; A.play(21); }
+      else if (row.k === 'name' && (k.code === 'ArrowRight' || k.code === 'ArrowLeft')) return;
       else if (row.k === 'col' && (k.code === 'ArrowRight' || k.code === 'ArrowLeft')) { this.cols[row.i] = (this.cols[row.i] + (k.code === 'ArrowRight' ? 1 : 9)) % 10; A.play(20); }
       else if (k.code === 'ArrowRight') { this.list[row.i] = o[(o.indexOf(this.list[row.i]) + 1) % o.length]; A.play(20); }
       else if (k.code === 'ArrowLeft') { this.list[row.i] = 'off'; A.play(21); }
@@ -413,6 +470,7 @@
         // colours follow the players that are on, in order
         AB.settings.netLocal = on;
         AB.settings.netColours = this.list.map((c, i) => (c !== 'off' ? this.cols[i] : -1)).filter(c => c >= 0);
+        AB.settings.netNames = this.list.map((c, i) => (c !== 'off' ? this.names[i] : null)).filter(n => n !== null);
         AB.saveSettings(); A.play(10); SC.go('network');
       }
     },
@@ -422,33 +480,42 @@
       U.panel(ctx, 30, 22, 580, 420, 0.82);
       U.centerText(ctx, 'PLAYERS ON THIS COMPUTER', 34, YELLOW);
       G.text(ctx, 'Each computer brings up to four players. Computer players are added by the host in the room.', 320, 58, GREY, 'font0', 1);
-      const label = SC.uiLate().controlLabel, name = AB.settings.netName;
-      const on = this.list.filter(c => c !== 'off').length, rows = this.rows();
-      let n = 0, y = 84;
+      const label = SC.uiLate().controlLabel, rows = this.rows();
+      let y = 80;
       rows.forEach((row, ri) => {
         const sel = ri === this.sel, c = this.list[row.i];
-        if (sel) U.menuCursor(ctx, 60, y + 17);
         if (row.k === 'ctl') {
+          if (row.i > 0) y += 4;
+          if (sel) U.menuCursor(ctx, 60, y + 15);
           G.text(ctx, `Player ${row.i + 1}: ${label(c)}`, 104, y, c === 'off' ? GREY : sel ? YELLOW : WHITE, 'font1');
-          if (c !== 'off') { n++; G.text(ctx, on > 1 ? `${name} ${n}` : name, 340, y + 2, CYAN, 'font0'); }
-          y += 22;
+          y += 20;
+        } else if (row.k === 'name') {
+          if (sel) U.menuCursor(ctx, 60, y + 15);
+          const editing = this.editing === row.i;
+          const shown = editing ? this.names[row.i] + ((U.frame() >> 4) % 2 ? '_' : ' ') : this.shownName(row.i);
+          G.text(ctx, 'Name: ' + shown, 124, y + 1, editing ? WHITE : sel ? YELLOW : CYAN, 'font1');
+          if (sel && !editing) G.text(ctx, '(Enter: type a name)', 470, y + 4, GREY, 'font0');
+          y += 19;
         } else {
+          if (sel) U.menuCursor(ctx, 60, y + 15);
           U.miniHead(ctx, this.cols[row.i], 124, y);
           G.text(ctx, 'Colour: ' + AB.COLOUR_NAMES[this.cols[row.i]], 144, y, sel ? YELLOW : WHITE, 'font1');
-          y += 26;
+          y += 21;
         }
       });
-      // what the keys are, as on the Player Setup screen
-      const ky = 290;
-      G.text(ctx, 'Keyboard layouts (Options > Define keyboard layouts):', 84, ky, YELLOW, 'font0');
+      // what the keys are, as on the Player Setup screen (in short when four players fill the list)
+      const ky = Math.max(276, y + 8);
       const kl = (c) => I.keyLabel(c).replace('Num ', 'N').replace('Enter', 'Ent').replace('Space', 'Spc');
-      I.layouts.forEach((Ly, i) => {
-        const dirs = Ly.up === 'ArrowUp' && Ly.down === 'ArrowDown' && Ly.left === 'ArrowLeft' ? 'Arrows' : `${kl(Ly.up)}${kl(Ly.left)}${kl(Ly.down)}${kl(Ly.right)}`;
-        G.text(ctx, `KEY ${i}:  ${dirs}   bomb ${kl(Ly.bomb)}   action ${kl(Ly.action)}`, 100, ky + 18 + i * 16, WHITE, 'font0');
-      });
       const pads = I.pads();
-      G.text(ctx, pads.length ? pads.map((p, i) => `JOY ${i}: ${p.id.slice(0, 28)}`).join('   ') : 'No joysticks detected (press a button on one to wake it up)', 100, ky + 18 + I.layouts.length * 16 + 6, GREY, 'font0');
-      G.text(ctx, 'Right: change   Left: off (or the other way on a colour)   Enter or Esc: done', 320, 418, GREY, 'font0', 1);
+      if (ky + 18 + I.layouts.length * 16 + 22 <= 398) {
+        G.text(ctx, 'Keyboard layouts (Options > Define keyboard layouts):', 84, ky, YELLOW, 'font0');
+        I.layouts.forEach((Ly, i) => {
+          const dirs = Ly.up === 'ArrowUp' && Ly.down === 'ArrowDown' && Ly.left === 'ArrowLeft' ? 'Arrows' : `${kl(Ly.up)}${kl(Ly.left)}${kl(Ly.down)}${kl(Ly.right)}`;
+          G.text(ctx, `KEY ${i}:  ${dirs}   bomb ${kl(Ly.bomb)}   action ${kl(Ly.action)}`, 100, ky + 18 + i * 16, WHITE, 'font0');
+        });
+        G.text(ctx, pads.length ? pads.map((p, i) => `JOY ${i}: ${p.id.slice(0, 28)}`).join('   ') : 'No joysticks detected (press a button on one to wake it up)', 100, ky + 18 + I.layouts.length * 16 + 6, GREY, 'font0');
+      } else G.text(ctx, 'Keyboard layouts: Options > Define keyboard layouts.' + (pads.length ? `   ${pads.length} joystick(s) found.` : ''), 320, ky, GREY, 'font0', 1);
+      G.text(ctx, 'Left/Right: change (Left turns a player off)   Enter on a name: type it   Esc: done', 320, 418, GREY, 'font0', 1);
       G.text(ctx, 'If two players want the same colour, the one who joined first keeps it.', 320, 400, GREY, 'font0', 1);
       if (this.errT > 0) { U.panel(ctx, 100, 200, 440, 50, 0.92); U.centerText(ctx, this.err, 216, ORANGE, 'font0'); }
     },
@@ -505,7 +572,7 @@
       U.panel(ctx, 30, 22, 580, 420, 0.82);
       if (!room) return;
       U.centerText(ctx, 'ROOM ' + room.n, 34, YELLOW);
-      G.text(ctx, room.host ? 'You are the host: set up the match, then start it.' : 'Waiting for the host to start the match...', 320, 56, room.host ? CYAN : GREY, 'font0', 1);
+      G.text(ctx, room.host ? 'You are the host: set up the match, then start it.' : room.state === 'playing' ? 'A match is on: you play again from its next round.' : 'Waiting for the host to start the match...', 320, 56, room.host || room.state === 'playing' ? CYAN : GREY, 'font0', 1);
       // computers and their players
       G.text(ctx, 'Computer', 56, 78, GREY, 'font0'); G.text(ctx, 'Players', 260, 78, GREY, 'font0'); G.text(ctx, 'Ping', 584, 78, GREY, 'font0', 2);
       // everyone's colour as the host has sorted them out (first come, first served)

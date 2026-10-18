@@ -9,6 +9,8 @@
   const screens = {};
   let cur = null, curName = '', frame = 0;
   const YELLOW = '#f8d848', WHITE = '#ffffff', GREY = '#a8a8a8', ORANGE = '#ff9030', CYAN = '#80e8ff';
+  const PCOL = ['#f0f0f0', '#505050', '#f03030', '#3060f0', '#30d040', '#f0e030', '#30e0e0', '#f040f0', '#f09020', '#9040e0'];   // AB.COLOUR_NAMES
+  const fitTo = (t, w, font = 'font0') => { t = String(t); if (G.textWidth(t, font) <= w) return t; while (t.length > 1 && G.textWidth(t + '...', font) > w) t = t.slice(0, -1); return t + '...'; };
 
   // ---------------------------------------------------------------- persistent state
   function load(key, def) { try { const v = JSON.parse(localStorage.getItem(key)); return v === null || v === undefined ? def : v; } catch (e) { return def; } }
@@ -427,7 +429,7 @@
     const M = AB.match; M.round++;
     // pick the arena now so the glue screen can load its picture along with this round's sounds
     const level = AB.pickArena(AB.settings), scheme = AB.pickScheme(AB.settings);
-    SC.go('glue', { level, then: () => SC.go('game', { level, scheme }) });
+    SC.go('glue', { level, scheme, then: () => SC.go('game', { level, scheme }) });
   }
   AB.startMatch = startMatch;
 
@@ -470,7 +472,8 @@
     },
     render(ctx) {
       glue(ctx, this.n);
-      if (this.a.level !== undefined) G.titleText(ctx, AB.levelName(this.a.level), 320, 180, 56, 560);
+      // the round's scheme (its layout), e.g. "Just the BASIC SET! (10)"
+      if (this.a.scheme) G.titleText(ctx, AB.schemeName(this.a.scheme), 320, 180, 56, 560);
       let txt = AB.msg(201, 'Loading data...');
       if (this.readySent) { const w = AB.netmatch.waitingFor ? AB.netmatch.waitingFor() : []; txt = w.length ? 'Waiting for ' + w.join(', ') + '...' : 'Waiting for the other computers...'; }
       else if (this.t > AB.TPS * 3 && !this.img) txt = 'Loading the arena...';
@@ -509,7 +512,7 @@
       this.held = []; this.deathShown = {}; this.netStats = null;
       this.session = net ? AB.netmatch.makeSession(this.g, this.devices, net) : null;
       // the round's music starts when the countdown ends (straight away without one)
-      this.track = AB.gameTrack(S, level); this.musicOn = false; this.lastCount = undefined;
+      this.track = AB.gameTrack(S, level); this.musicOn = false; this.lastCount = undefined; this.goTick = undefined;
       A.stopMusic();
       // warm up recoloured sprites for the players in this round
       for (const p of M.players) G.prewarm(['walk', 'stand', 'bombs', 'mflame', 'kick'], p.color);
@@ -555,7 +558,7 @@
           else if (this.lastCount > 0) A.playRange(200, 299);
           this.lastCount = n;
         }
-        if (n === 0 && !this.musicOn) { this.musicOn = true; if (this.track) A.music(this.track); }
+        if (n === 0 && !this.musicOn) { this.musicOn = true; this.goTick = g.tick; if (this.track) A.music(this.track); }
       }
       if (this.session) {
         // rollback (js/net.js): the session runs the game on, correcting it when the others' real
@@ -593,6 +596,27 @@
       if (e.t === 'snd') { if (e.lo === e.hi) A.play(e.lo); else A.playRange(e.lo, e.hi); }
       else if (e.t === 'taunt') setTimeout(() => A.playRange(700, 999), 500);
       else if (e.t === 'death') { if (340 + e.anim <= 349) A.play(340 + e.anim); }
+    },
+    // during the countdown and for a second after it: who is who, over each bomberman (a stripe in their colour)
+    drawNameTags(ctx) {
+      const g = this.g, M = AB.match;
+      if (!M || M.demo) return;
+      const left = g.startDelay > 0 ? AB.TPS : this.goTick === undefined ? AB.TPS : AB.TPS - (g.tick - this.goTick);
+      if (left <= 0) return;
+      const a = Math.min(1, left / (AB.TPS / 3));            // fades over the last third of a second
+      ctx.save(); ctx.globalAlpha = a;
+      for (const p of g.players) {
+        if (!p.alive) continue;
+        const mp = M.players.find(q => q.slot === p.slot);
+        const name = M.net && mp && mp.name ? mp.name
+          : p.isAI ? 'AI ' + (p.slot + 1) : AB.msg(33, 'Player %u').replace('%u', p.slot + 1);
+        const w = Math.min(G.textWidth(name, 'font0'), 140) + 10;
+        const x = AB.clamp(Math.round(p.x), w / 2 + 2, 638 - w / 2), y = Math.max(46, Math.round(p.y) - 62);
+        ctx.fillStyle = 'rgba(0,0,0,0.72)'; ctx.fillRect(x - w / 2, y - 2, w, 14);
+        ctx.fillStyle = PCOL[p.color % 10]; ctx.fillRect(x - w / 2, y + 11, w, 2);
+        G.text(ctx, fitTo(name, 140), x, y, WHITE, 'font0', 1);
+      }
+      ctx.restore();
     },
     // network round: draw the game as this computer knows it for sure. A death the others' inputs could
     // still undo shows the player standing until it's certain; then the death animation starts. Players
@@ -651,14 +675,15 @@
         G.text(ctx, txt, 515, 28, ai + gh + ro ? WHITE : '#60f060', 'font0', 2);
       }
       if (M && M.demo && blink()) { panel(ctx, 230, 450, 180, 24, 0.7); centerText(ctx, 'DEMO - press any key', 454, YELLOW, 'font0'); }
-      // round start: the arena's name and a 3, 2, 1 countdown
+      // round start: the scheme's name and a 3, 2, 1 countdown (then who is who, on top)
       if (this.g.startDelay > 0) {
         const g = this.g, n = Math.ceil(g.startDelay / AB.TPS), frac = ((g.startDelay - 1) % AB.TPS + 1) / AB.TPS;    // 1 -> 0 over each number
         // each number starts as tall as the screen and shrinks about the middle, fading at the end
         const p = 1 - frac, e = 1 - Math.pow(1 - p, 3);
         G.titleTextMid(ctx, String(n), 320, 240, 480 - 330 * e, p > 0.75 ? Math.max(0, (1 - p) / 0.25) : 1);
-        G.titleText(ctx, AB.levelName(g.level), 320, 200, 52, 560);
+        G.titleText(ctx, g.scheme && g.scheme.name || '', 320, 200, 52, 560);
       }
+      this.drawNameTags(ctx);
       if (this.session && this.showNet) {
         const st = AB.netmatch.statsLines(this.netStats);
         this.netStats = st.keep;
@@ -671,6 +696,7 @@
         centerText(ctx, 'Waiting for ' + (who.length ? [...new Set(who)].join(', ') : 'the other computers') + '...', 228, YELLOW, 'font0');
         centerText(ctx, Math.floor(this.stallT / AB.TPS) + ' s', 246, GREY, 'font0');
       }
+      if (this.net) AB.netmatch.drawBanner(ctx);
       if (this.desync) { panel(ctx, 120, 200, 400, 60, 0.92); centerText(ctx, 'The computers are out of sync.', 214, ORANGE); centerText(ctx, 'Press Esc to leave the match.', 238, WHITE, 'font0'); }
       if (this.paused) { panel(ctx, 220, 210, 200, 50, 0.85); centerText(ctx, 'PAUSED', 226, YELLOW); }
       if (this.forfeitAsk > 0) { panel(ctx, 150, 206, 340, 40, 0.88); centerText(ctx, 'Press F10 again to forfeit this round', 220, YELLOW, 'font0'); }
@@ -777,6 +803,7 @@
           miniHead(ctx, p.color, 429 + k * 20, y + 1);
         }
       });
+      if (M.net) AB.netmatch.drawBanner(ctx);
       if (M.net && !AB.netplay.isHost() && this.pick !== null) {
         const list = AB.netmatch.NUDGE_SOUNDS, x = 424, y = 162, h = 15;
         panel(ctx, x, y, 210, 30 + list.length * h, 0.88);

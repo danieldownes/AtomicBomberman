@@ -181,6 +181,7 @@ window.AB = window.AB || {};
     const all = window.AB_DATA.schemes, on = S.schemes ? Object.keys(S.schemes).filter(k => S.schemes[k] && all[k]) : [];
     return on.length ? on.sort() : [all[S.scheme] ? S.scheme : 'basic'];
   };
+  AB.schemeName = (key) => { const s = window.AB_DATA.schemes[key]; return s ? s.name : String(key || ''); };
   AB.pickScheme = (S) => { const on = AB.schemesOn(S); return on[Math.floor(Math.random() * on.length)]; };
   // the players a scheme is made for, from the tag in its name (the original's own convention):
   // "(10)" up to 10, "(8 ONLY)" exactly 8, "(5)(5)" two teams, "(1+)" or no tag: any number

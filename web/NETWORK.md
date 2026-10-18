@@ -10,8 +10,9 @@ needs no server of its own, so it works from GitHub Pages as it is.
 * **Your name** is at the top: press Enter on it to type a new one. The first time, it's one of the
   original's random node names (MESSAGES.TXT 500+), and the cursor starts there.
 * **Players here** picks the keyboards and joysticks this computer brings, up to four, and each
-  player's colour. It works like the local Player Setup: Right changes a player's control, Left
-  turns it off. On a colour row, Left and Right step through the ten colours.
+  player's name and colour. It works like the local Player Setup: Right changes a player's control,
+  Left turns it off. Enter on a name row types that player's own name (empty: the computer's name,
+  numbered, e.g. "Bob 2"). On a colour row, Left and Right step through the ten colours.
   * The host sorts out clashes in joining order. A player who asks for a colour someone earlier
     already has gets the next free one, and computer players take what's left.
 * The lobby lists Room 1, 2 and 3. Each shows whether it is empty, waiting for players or playing.
@@ -65,6 +66,12 @@ needs no server of its own, so it works from GitHub Pages as it is.
 
 * If a computer leaves (or goes quiet for 8 seconds), its players become computer players from the
   same tick on every screen. If "Lost net players revert to AIs" is off, those players die instead.
+  A message over the top of the screen says who left or lost connection.
+* **Rejoining.** That computer can come back while the match is on: its room shows "Enter: rejoin"
+  in the lobby (the browser keeps an id of its own, `netCid`, and the host remembers the ids that
+  dropped out). It waits in the room and plays again from the next round, with its players back in
+  their slots, names, colours and scores. A computer that drops out of a lobby, or a match that
+  has ended, simply joins again as usual.
 * Later rounds keep everyone in the same slot, so scores stay with the right player.
 * If the host leaves, the room closes and everyone goes back to the lobby.
 
@@ -137,7 +144,7 @@ with "Could not reach the room host (a strict network may need a relay)."
 
 | Message | Direction | Purpose |
 |---|---|---|
-| `hello {v, role, name, players}` | to host | probe the room, or ask to join |
+| `hello {v, role, name, players, peer, cid}` | to host | probe the room, or ask to join (`cid`: this browser's id, to rejoin a match it dropped out of) |
 | `room {info}` | host to members and probes | state, host, members, pings, settings (every second and on change) |
 | `welcome {id}` / `reject {reason}` | host to joiner | accepted, or why not (version, in a game, full) |
 | `ping {ts}` / `pong {ts}` | host and member | round trip every second; the shown ping is smoothed |
@@ -145,10 +152,11 @@ with "Could not reach the room host (a strict network may need a relay)."
 | `ready {round}` | member to host | arena loaded |
 | `go {round}` | host to members | everyone has loaded the arena picture and sound effects (or 45 s passed): start the clock. The host starts half its worst ping later, so all start together |
 | `ls {r, m:{t:'sum', tick, h}}` | each to all (via host) | checksum of a confirmed tick of round `r` |
-| `drop {round, c, from, fill}` | host to members | computer `c` has left: its players are AIs (or out) from tick `from`; `fill` is the host's copy of its last inputs |
+| `drop {round, c, from, fill, name, why}` | host to members | computer `c` has left (`why`: left or timeout): its players are AIs (or out) from tick `from`; `fill` is the host's copy of its last inputs |
 | `mesh {ids}` | member to host | the members it has a direct game channel with |
 | `g {d}` | any (via host) | an input packet, while no game channel is open |
 | `nudge {n, pick}` | member to host to others | pressed bomb on the results screen (`pick`: a sound from the list, or -1) |
+| `notice {text}` | host to members | a message for the top of the screen (someone rejoined) |
 | `victory` | host to members | the match is won: show the victory screen |
 | `end {reason?}` | host to members | match over, back to the room; with a reason, the room has closed |
 | `leave` | member to host | leaving (also sent when the tab closes) |

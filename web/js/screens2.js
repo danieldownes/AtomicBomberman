@@ -267,7 +267,7 @@
     go() {
       if (this.gone) return; this.gone = true;
       const st = this.st;
-      SC.go('glue', { level: st.level, then: () => SC.go('game', { level: st.level, scheme: st.scheme, campaign: st }) });
+      SC.go('glue', { level: st.level, scheme: st.scheme, then: () => SC.go('game', { level: st.level, scheme: st.scheme, campaign: st }) });
     },
     render(ctx) {
       U.glue(ctx, (AB.match.campaign.stage + 2) % 7);

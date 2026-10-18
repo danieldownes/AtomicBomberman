@@ -73,12 +73,13 @@ for p in glob.glob(os.path.join(RAW, 'DATA/RES/*.PCX')):
 print('pcx', n)
 
 # the Aliens arena's floor (FIELD6.PCX) is much brighter than the sprites on it: darken its 15 x 11
-# playing area (AB.OX/OY = 20/64, cells 40 x 36) by half, leaving the frame around it as it is
+# playing area (AB.OX/OY = 20/64, cells 40 x 36) to 60 % and make it more colourful (x1.35), so the
+# black bombs still stand out, leaving the frame around it as it is
 from PIL import ImageEnhance
 f6 = os.path.join(WEB, 'img', 'field6.png')
 if os.path.exists(f6):
     im = Image.open(f6).convert('RGB'); box = (20, 64, 20 + 15 * 40, 64 + 11 * 36)
-    im.paste(ImageEnhance.Brightness(im.crop(box)).enhance(0.5), box); im.save(f6, optimize=True)
+    im.paste(ImageEnhance.Color(ImageEnhance.Brightness(im.crop(box)).enhance(0.6)).enhance(1.35), box); im.save(f6, optimize=True)
 
 # menu cursor: BOMBDUDE.PCX with black keyed out
 im = Image.open(os.path.join(RAW, 'DATA/RES/BOMBDUDE.PCX')).convert('RGBA')

@@ -170,10 +170,12 @@ These are under main menu > Options, next to the original settings.
   eating an apple, blowing on his knuckles). One plays when a player stands still for five
   seconds.
 * **Intro Movie on Start**: plays the CD's intro movie before the title screen.
-* **Round Start Countdown** (on by default): each round opens with the arena's name and a 3, 2, 1
-  countdown before anyone can move: each number starts screen-high and shrinks away, with a wall
-  slam, and an explosion on "go". The round's music starts after it. The loading screen shows the
-  arena's name too.
+* **Round Start Countdown** (on by default): each round opens with the name of its scheme (the
+  layout, e.g. "Just the BASIC SET! (10)") and a 3, 2, 1 countdown before anyone can move: each
+  number starts screen-high and shrinks away, with a wall slam, and an explosion on "go". The
+  round's music starts after it. During the countdown and for a second after, every bomberman
+  has a name tag ("Player 1", "AI 3", or the player's own name in network games). The loading
+  screen shows the scheme's name too.
 * **Only computer players left** (local and network games, not campaigns): once every human player
   is out and at least two computer players remain, HURRY sounds, and 3 seconds later the walls
   close in four times as fast and fill the arena. An AI that wins by knocking out the last human

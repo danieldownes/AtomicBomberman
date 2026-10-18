@@ -25,6 +25,13 @@
   NP.MAX_PLAYERS = 10;
   NP.MAX_COMPUTERS = 5;            // like the original
   const PREFIX = 'atomic-bomberman-dd-v1-room-';
+  // this browser's own id (kept in the settings): a computer that drops out of a match can rejoin it
+  NP.clientId = function () {
+    if (!AB.settings.netCid) { AB.settings.netCid = Math.random().toString(36).slice(2, 12); AB.saveSettings(); }
+    return AB.settings.netCid;
+  };
+  // what a room's info shows of the computers that may rejoin (not the ids themselves)
+  NP.cidTag = (cid) => { let h = 7; for (const ch of String(cid)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0; return h.toString(36); };
   NP.roomPeerId = (n) => PREFIX + n;
   const now = () => performance.now();
 
@@ -232,11 +239,17 @@
     for (let i = 0; i < ais; i++) out.push(take(0));
     return out;
   };
+  // each player's name: their own (AB.settings.netNames, set on the Players here screen), or else
+  // the computer's name, numbered when it brings more than one player
+  NP.defaultPlayerName = (i, count) => (count > 1 ? `${AB.settings.netName} ${i + 1}` : AB.settings.netName);
+  NP.localNames = function (count) {
+    const own = Array.isArray(AB.settings.netNames) ? AB.settings.netNames : [];
+    return Array.from({ length: count }, (_, i) => (typeof own[i] === 'string' && own[i].trim() ? own[i].trim().slice(0, 16) : NP.defaultPlayerName(i, count)));
+  };
   function localPlayers() {
-    const list = NP.localControls();
-    const name = AB.settings.netName;
-    const cols = NP.localColours();
-    return list.slice(0, 4).map((control, i) => ({ name: list.length > 1 ? `${name} ${i + 1}` : name, control, color: cols[i] }));
+    const list = NP.localControls().slice(0, 4);
+    const cols = NP.localColours(), names = NP.localNames(list.length);
+    return list.map((control, i) => ({ name: names[i], control, color: cols[i] }));
   }
   NP.localPlayers = localPlayers;
 
@@ -294,6 +307,7 @@
     let k = 0;
     return {
       n: room.n, state: room.state, hostName: room.members[0] && room.members[0].name, ais: room.ais, aiLevel: room.aiLevel,
+      rejoin: [...(room.departed || new Map()).keys()].map(NP.cidTag),
       aiColours: cols.slice(cols.length - room.ais),
       ver: AB.VERSION.text, commit: AB.VERSION.commit,
       members: room.members.map(m => ({ id: m.id, name: m.name, peer: m.peer, ping: Math.round(m.ping || 0), players: m.players.map(p => ({ name: p.name, color: cols[k++] })) })),
@@ -322,16 +336,26 @@
         if (m.role === 'probe') { room.probes.push(c); c.send({ t: 'room', info: roomInfo(room) }); return; }
         // rollback needs the same game code everywhere: builds from different commits can't play together
         // (a dev copy, with no commit, is only held to the protocol number)
+        // a computer that dropped out of this match may come back (from the next round)
+        const back = room.state !== 'waiting' && m.cid && room.departed && room.departed.get(String(m.cid));
         const reason = m.v !== NP.PROTO ? 'That room runs a different version of the game.'
           : NP.versionClash(m.commit) ? `The host has ${AB.VERSION.text}, you have ${m.ver || 'another build'}: the older one should reload.`
-          : room.state !== 'waiting' ? 'A game is in progress in that room.'
+          : room.state !== 'waiting' && !back ? 'A game is in progress in that room.'
             : room.members.length >= NP.MAX_COMPUTERS ? 'That room is full (5 computers).'
               : humanCount(room) + (m.players || []).length > NP.MAX_PLAYERS ? 'Not enough free player slots in that room.' : null;
         if (reason) { c.send({ t: 'reject', reason }); setTimeout(() => c.close(), 500); return; }
-        member = { id: 'p' + Math.random().toString(36).slice(2, 8), name: String(m.name || 'Bomberman').slice(0, 20),
+        member = { id: back ? back.id : 'p' + Math.random().toString(36).slice(2, 8), name: String(m.name || 'Bomberman').slice(0, 20), cid: m.cid ? String(m.cid) : null,
                    players: (m.players || []).slice(0, 4).map(p => ({ name: String(p.name).slice(0, 20), control: String(p.control), color: AB.clamp(p.color | 0, 0, 9) })),
                    ping: 0, conn: c, lastSeen: now(), ready: false, peer: typeof m.peer === 'string' ? m.peer : null, game: null, direct: new Set() };
         room.members.push(member);
+        if (back) {
+          // same id as before, so it gets its old players (and their scores) back at the next round
+          room.departed.delete(member.cid);
+          c.send({ t: 'welcome', id: member.id, rejoin: true });
+          room.say(member.name + ' is back (from the next round).');
+          emit({ t: 'rejoined', member });
+          sendRoom(room); return;
+        }
         room.ais = Math.min(room.ais, NP.MAX_PLAYERS - humanCount(room));
         c.send({ t: 'welcome', id: member.id });
         room.say(member.name + ' joined.');
@@ -391,7 +415,10 @@
     if (!room.members.includes(member)) return;
     room.members = room.members.filter(m => m !== member);
     room.say(member.name + (why === 'timeout' ? ' lost connection.' : ' left.'));
-    if (room.state === 'playing') emit({ t: 'memberLost', member });
+    if (room.state === 'playing') {
+      if (member.cid) { room.departed = room.departed || new Map(); room.departed.set(member.cid, { id: member.id, name: member.name }); }
+      emit({ t: 'memberLost', member, why });
+    }
     try { member.conn.close(); } catch (e) {}
     if (member.game) try { member.game.close(); } catch (e) {}
     sendRoom(room);
@@ -422,12 +449,12 @@
       const c = L.peer.connect(NP.roomPeerId(n), { reliable: true, serialization: 'json', metadata: { role: 'join' } });
       room.conn = c;
       const to = setTimeout(() => room.fail(NP.relay === 'relay' ? 'Could not reach the room host.' : 'Could not reach the room host (a strict network may need a relay).'), 15000);
-      c.on('open', () => c.send({ t: 'hello', v: NP.PROTO, role: 'join', name: AB.settings.netName, players: localPlayers(), commit: AB.VERSION.commit, ver: AB.VERSION.text, peer: L.peer.id }));
+      c.on('open', () => c.send({ t: 'hello', v: NP.PROTO, role: 'join', name: AB.settings.netName, players: localPlayers(), commit: AB.VERSION.commit, ver: AB.VERSION.text, peer: L.peer.id, cid: NP.clientId() }));
       c.on('data', recv((m) => {
         if (!m || typeof m !== 'object') return;
         room.lastSeen = now();
         if (m.t === 'reject') { clearTimeout(to); room.fail(m.reason); return; }
-        if (m.t === 'welcome') { clearTimeout(to); done = true; room.connecting = false; room.me = m.id; room.say('Joined room ' + n + '.'); startMemberTimer(room); openHostGame(room); res(room); return; }
+        if (m.t === 'welcome') { clearTimeout(to); done = true; room.connecting = false; room.me = m.id; room.rejoin = !!m.rejoin; room.say(m.rejoin ? 'Back in room ' + n + ': you play again from the next round.' : 'Joined room ' + n + '.'); startMemberTimer(room); openHostGame(room); res(room); return; }
         if (m.t === 'room') { room.info = m.info; room.state = m.info.state; room.members = m.info.members; room.ais = m.info.ais; room.aiLevel = m.info.aiLevel || 'hard'; emit({ t: 'room' }); updateMesh(room); return; }
         if (m.t === 'ping') { c.send({ t: 'pong', ts: m.ts }); return; }
         if (m.t === 'g') { const b = toBytes(m.d); if (b && AB.netmatch) AB.netmatch.onGamePacket(b); return; }
@@ -573,11 +600,18 @@
     if (prevPlayers) {
       // later rounds keep everyone in the same slot (scores are kept per slot). Nobody can join mid-match;
       // players whose computer left carry on as AIs (option #262) or sit the rest of the match out.
-      for (const p of prevPlayers) {
-        if (p.ai || room.members.some(m => m.id === p.owner)) players.push(Object.assign({}, p));
-        else if (S.lostNetToAI) players.push(Object.assign({}, p, { ai: true, aiLevel: room.aiLevel, owner: null, control: 'ai' }));
+      // A computer that comes back (it rejoined from the lobby) gets its players back.
+      const here = (id) => room.members.some(m => m.id === id);
+      for (const p of prevPlayers.concat(room.benched || [])) {
+        if (p.wasOwner && here(p.wasOwner)) players.push(Object.assign({}, p, { ai: false, owner: p.wasOwner, control: p.wasControl, wasOwner: undefined, wasControl: undefined, aiLevel: undefined, benched: undefined }));
+        else if (p.ai || here(p.owner)) players.push(Object.assign({}, p));
+        else if (S.lostNetToAI) players.push(Object.assign({}, p, { ai: true, aiLevel: room.aiLevel, owner: null, control: 'ai', wasOwner: p.owner, wasControl: p.control }));
+        else players.push(Object.assign({}, p, { benched: true, wasOwner: p.wasOwner || p.owner, wasControl: p.wasControl || p.control }));
       }
+      room.benched = players.filter(p => p.benched);
+      players = players.filter(p => !p.benched).sort((a, b) => a.slot - b.slot);
     } else {
+      room.benched = []; room.departed = new Map();       // a new match: nobody to bring back
       const cols = NP.assignColours(room.members, room.ais);
       for (const m of room.members) for (const p of m.players) {
         if (players.length >= NP.MAX_PLAYERS) break;
