@@ -1,5 +1,5 @@
 // Network play screens: the lobby (three fixed rooms), the room waiting area, and the match controller
-// that keeps every computer's rounds in step (start -> load -> ready -> go -> lockstep -> results).
+// that keeps every computer's rounds in step (start -> load -> ready -> go -> rollback play -> results).
 'use strict';
 (function (AB) {
   const SC = AB.screens, G = AB.gfx, A = AB.audio, I = AB.input, NP = AB.netplay;
@@ -45,12 +45,18 @@
     'During a match',
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     ' - Every computer runs the same game and only key presses travel',
-    '   over the network. If one computer falls behind, the others',
-    '   wait for it ("Waiting for ...").',
+    '   over the network. Each one guesses what the others press until',
+    '   it arrives, then quietly corrects itself, so long distances',
+    '   still play smoothly. Only if a computer stops sending do the',
+    '   others wait for it ("Waiting for ...").',
+    ' - F9 shows the network figures (delay, corrections, connections).',
     ' - Keep the game in the front tab. Browsers slow down background',
     '   tabs, and that holds everyone up.',
     ' - Pause and Force Draw are off. F10 twice gives up the round for',
     '   the players on your computer.',
+    ' - On the results screen only the host goes on. Pressing bomb there',
+    '   tells everyone you are waiting; after a few presses you can pick',
+    '   a sound to send them (Up/Down, bomb; Esc closes the list).',
     ' - When only computer players are left, HURRY sounds, and 3 s later',
     '   the walls close in four times as fast, all the way.',
     ' - If a computer leaves, its players carry on as computer',
@@ -86,22 +92,26 @@
         break;
       case 'ready': NM.checkGo(); break;
       case 'memberLost': NM.memberLost(ev.member); break;
+      case 'nudge': NM.gotNudge(ev); break;
       case 'hostLost': NM.notice = 'The host left, so the room has closed.'; NM.reset(); SC.go('network'); break;
     }
   });
   NM.pending = [];
-  // lockstep messages carry their round: late ones from the last round are dropped, early ones for a
-  // round this computer hasn't started yet are kept until it has
-  NM.early = [];
+  // checksums of the round being played (other rounds' are dropped: they can't be compared any more)
   NM.deliver = function (ev) {
     const s = NM.session;
-    if (s && s.round === ev.r) { if (NM.transport.onmessage) NM.transport.onmessage(ev.m); }
-    else if (!s || ev.r > s.round) NM.early.push(ev);
+    if (s && NM.cfg && ev.r === NM.cfg.round && ev.m && ev.m.t === 'sum') s.onSum(ev.m.tick, ev.m.h);
   };
-  NM.reset = function () { NM.session = null; NM.transport = null; NM.cfg = null; NM.pending = []; NM.early = []; NM.goRound = 0; NM.myReady = 0; if (AB.match && AB.match.net) AB.match = null; };
+  // input packets (js/net.js) carry their round's low byte. Ones for another round are dropped: whatever
+  // the session hasn't confirmed is sent again in every packet anyway.
+  NM.onGamePacket = function (b) {
+    const s = NM.session;
+    if (s && b.length > 1 && b[1] === s.round) s.onPacket(b);
+  };
+  NM.reset = function () { NM.nudges = {}; NM.session = null; NM.cfg = null; NM.pending = []; NM.goRound = 0; NM.myReady = 0; NM.forfeitSlots = null; if (AB.match && AB.match.net) AB.match = null; };
   // a drop may arrive before this computer has started the round it belongs to: keep it until then
   NM.applyDrop = function (d) {
-    if (NM.session && NM.session.round === d.round) NM.session.drop(d.slots, d.from);
+    if (NM.session && NM.cfg && NM.cfg.round === d.round) NM.session.drop(d.c, d.from, d.fill);
     else NM.pending.push(d);
   };
   // host: begin a round on every computer
@@ -109,7 +119,6 @@
     const prev = NM.cfg && NM.cfg.players;
     const cfg = NP.makeRound(round, prev);
     NP.setState('playing');
-    for (const m of NP.room.members) m.lastTick = 0;
     NP.send({ t: 'start', cfg });
     NM.start(cfg);
   };
@@ -121,7 +130,7 @@
     const M = AB.match = first ? { net: true, wins: {}, kills: {}, round: 0, players: [], demo: false } : AB.match;
     M.round = cfg.round; M.S = S; M.over = false;
     M.players = cfg.players.map(p => Object.assign({}, p, { control: p.ai ? 'ai' : p.owner === me ? p.control : 'net' }));
-    NM.cfg = cfg; NM.session = null;
+    NM.cfg = cfg; NM.session = null; NM.nudges = {};
     for (const m of (NP.room ? NP.room.members : [])) m.ready = false;
     SC.go('glue', { level: cfg.level, net: cfg.round, then: () => SC.go('game', { net: cfg }) });
   };
@@ -134,60 +143,64 @@
   NM.checkGo = function () {
     const room = NP.room; if (!room || !room.host || !NM.cfg) return;
     const r = NM.cfg.round;
-    if (NM.myReady !== r || NM.goRound === r) return;
+    if (NM.myReady !== r || Math.abs(NM.goRound) === r) return;
     const all = room.members.slice(1).every(m => m.ready === r);
-    if (all || performance.now() - NM.readyAt > 45000) { NP.send({ t: 'go', round: r }); NM.goRound = r; }
+    if (all || performance.now() - NM.readyAt > 45000) {
+      NP.send({ t: 'go', round: r });
+      // the 'go' reaches the others about half a ping later: start that much later too
+      const late = Math.min(400, Math.max(0, ...room.members.slice(1).map(m => m.ping || 0)) / 2);
+      NM.goRound = -r;
+      setTimeout(() => { if (NM.goRound === -r) NM.goRound = r; }, late);
+    }
   };
   // host, while loading: the computers that haven't finished yet
   NM.waitingFor = function () {
     const room = NP.room; if (!room || !room.host || !NM.cfg) return [];
     return room.members.slice(1).filter(m => m.ready !== NM.cfg.round).map(m => m.name);
   };
-  setInterval(() => { if (NP.isHost() && NM.cfg && NM.goRound !== NM.cfg.round) NM.checkGo(); }, 500);
-  // host: a computer left mid-round -> its players stop needing input from the next tick it never sent
+  setInterval(() => { if (NP.isHost() && NM.cfg && Math.abs(NM.goRound) !== NM.cfg.round) NM.checkGo(); }, 500);
+  // host: a computer left mid-round -> from the tick after the last input of it the host has, its players
+  // are computer players (or out), on every computer. The host's copy of its last inputs goes along, so
+  // everyone plays the same ticks with the same inputs up to there.
   NM.memberLost = function (member) {
     const cfg = NM.cfg;
     if (!cfg) return;
-    // (player indexes, which are the lockstep slots; colour slots can have gaps in later rounds)
-    const slots = cfg.players.map((p, i) => (p.owner === member.id && !p.ai ? i : -1)).filter(i => i >= 0);
-    if (!slots.length) return;
-    const s = NM.session && NM.session.round === cfg.round ? NM.session : null;
-    // every tick up to member.lastTick was relayed to everyone, so all computers agree on where to cut
-    const from = s ? Math.max(member.lastTick + 1, s.game.tick + 1) : 1;
-    const d = { t: 'drop', round: cfg.round, slots, from };
+    const c = cfg.computers.indexOf(member.id);
+    if (c <= 0) return;
+    const s = NM.session && NM.session.round === (cfg.round & 255) ? NM.session : null;
+    const from = s ? s.contig[c] + 1 : 1;
+    const d = { t: 'drop', round: cfg.round, c, from, fill: s ? s.fillFor(c) : null };
     NP.send(d);
     NM.applyDrop(d);
   };
-  // a game screen asks for its lockstep session
+  // a game screen asks for its rollback session
   NM.makeSession = function (g, devices, cfg) {
-    const me = NP.myId();
-    const local = [], remote = [];
-    cfg.players.forEach((p, i) => { if (p.ai) return; if (p.owner === me) local.push(i); else remote.push(i); });
-    const tr = NM.transport = { onmessage: null, send: (m) => NP.send({ t: 'ls', r: cfg.round, m }) };
-    const s = new AB.net.LockstepSession(tr, g, {
-      localSlots: local, remoteSlots: remote, inputDelay: cfg.delay, readLocal: (i) => { const b = I.read(devices[i]); if (NM.forfeitSlots && NM.forfeitSlots.delete(i)) return b | AB.IN.FORFEIT; return b; },
-      onDrop: (slots) => {
+    const me = NP.myId(), comps = cfg.computers, n = comps.length;
+    const slotsOf = comps.map(id => cfg.players.map((p, i) => (!p.ai && p.owner === id ? i : -1)).filter(i => i >= 0));
+    const s = new AB.net.RollbackSession(g, {
+      computers: n, me: Math.max(0, comps.indexOf(me)), slotsOf, inputDelay: cfg.delay, maxRollback: cfg.maxRollback, round: cfg.round,
+      readLocal: (i) => { const b = I.read(devices[i]); if (NM.forfeitSlots && NM.forfeitSlots.delete(i)) return b | AB.IN.FORFEIT; return b; },
+      send: (b) => NP.sendGame(b),
+      sendSum: (tick, h) => NP.send({ t: 'ls', r: cfg.round, m: { t: 'sum', tick, h } }),
+      // inside the game, at the drop's tick (so a rollback replays it too)
+      applyDrop: (game, slots) => {
         for (const i of slots) {
-          const p = g.players[i]; if (!p) continue;
+          const p = game.players[i]; if (!p) continue;
           if (cfg.sim.lostNetToAI) { p.isAI = true; p.ai = { plan: null, t: 0 }; p.aiLevel = cfg.aiLevel || 'hard'; }
-          else if (p.alive) g.killPlayer(p, -1, true);
-          const mp = AB.match.players[i]; if (mp) { mp.ai = true; mp.control = 'ai'; }
+          else if (p.alive) game.killPlayer(p, -1, true);
+          const mp = AB.match && AB.match.players[i]; if (mp) { mp.ai = true; mp.control = 'ai'; }
         }
       },
     });
-    s.round = cfg.round;
     NM.session = s;
-    const early = NM.early.filter(e => e.r === cfg.round);
-    NM.early = NM.early.filter(e => e.r > cfg.round);
-    for (const e of early) tr.onmessage(e.m);
-    for (const d of NM.pending.filter(d => d.round === cfg.round)) s.drop(d.slots, d.from);
+    for (const d of NM.pending.filter(d => d.round === cfg.round)) s.drop(d.c, d.from, d.fill);
     NM.pending = NM.pending.filter(d => d.round !== cfg.round);
     if (NP.room && NP.room.host) {
       NP.room.inGame = true;
       for (const m of NP.room.members) m.lastInput = performance.now();
       // players whose computer left before this round started
       const gone = new Set(cfg.players.filter(p => !p.ai && p.owner && !NP.room.members.some(m => m.id === p.owner)).map(p => p.owner));
-      for (const id of gone) NM.memberLost({ id, lastTick: 0 });
+      for (const id of gone) NM.memberLost({ id });
     }
     return s;
   };
@@ -205,6 +218,73 @@
   // F10 (pressed twice) in a network round: this computer's players give up the round. It goes out as
   // part of their next input, so every computer drops them at the same tick
   NM.forfeitAll = function () { if (NM.session) NM.forfeitSlots = new Set(NM.session.localSlots); };
+  // results screen: a member pressing bomb can't start the next round (only the host can). Like the
+  // original, that gets the "not allowed" sound, and the host and the others hear it too and see who
+  // is waiting. From the third press on, the member gets a list of sounds to send instead.
+  NM.nudges = {};
+  // [event id, phrase] from the sound library (data/sounds.js), with the name the list shows
+  NM.NUDGE_SOUNDS = [
+    ['Hurry up, tough guy', 2700, 'Yeah, hurry up there, tough guy'],
+    ['Cut the macho crap', 2700, 'Would you guys cut out this macho crap and hurry'],
+    ['Do not make me come out', 2700, "DON'T MAKE ME COME OUT THERE"],
+    ['Time is running out', 2700, "Time's running out"],
+    ['Alarm', 2700, 'ALARM1'],
+    ['Beeps', 2700, 'BEEPS'],
+    ['Poops (1)', 550, 'POOPS1'],
+    ['Poops (2)', 550, 'POOPS3'],
+    ['Here comes the poop man', 3150, 'Here comes the poop man'],
+    ['Constipation', 3100, 'Constipation'],
+    ['Ewwwwww', 2300, 'Ewwwwww'],
+    ['Make it stop', 2300, 'Make it stop'],
+    ['Mommy', 2300, 'Mommy'],
+    ['Wanna buy a monkey', 700, 'Wanna buy a monkey'],
+    ['Ready to rumble', 9000, "Let's get ready to rumble"],
+  ];
+  function playNudgeSound(i) {
+    const s = NM.NUDGE_SOUNDS[i], ev = s && (window.AB_SOUNDS || { events: [] }).events.find(e => e.lo === s[1]);
+    const g = ev && ev.groups.find(x => x.label === s[2]);
+    const on = g ? g.clips.filter(n => A.isOn(ev, n)) : [];         // (respects the sound settings' ticks)
+    if (on.length) A.playName(on[Math.floor(Math.random() * on.length)], 1, { late: true }); else A.playRange(40, 41);
+  }
+  // pick: one of NUDGE_SOUNDS, or none for the "not allowed" sound
+  NM.nudge = function (pick) {
+    const me = NP.myId(), t = performance.now(), my = NM.nudges[me];
+    if (my && t - my.at < 400) return my.n;                        // (no machine-gunning)
+    const n = (my ? my.n : 0) + 1;
+    const ev = { id: me, n, pick: Number.isInteger(pick) ? pick : -1 };
+    NM.gotNudge(ev);
+    NP.send({ t: 'nudge', n, pick: ev.pick });
+    return n;
+  };
+  NM.gotNudge = function (ev) {
+    if (!ev.id) return;
+    NM.nudges[ev.id] = { n: ev.n | 0, at: performance.now() };
+    if (ev.pick >= 0 && ev.pick < NM.NUDGE_SOUNDS.length) playNudgeSound(ev.pick); else A.playRange(40, 41);
+  };
+  // the computer a match player belongs to, for the results screen's markers
+  NM.nudgeOf = function (p) { const v = p && p.owner && NM.nudges[p.owner]; return v || null; };
+  // F9: the network figures, for the overlay on the game screen
+  NM.statsLines = function (prev) {
+    const s = NM.session; if (!s) return [];
+    const i = s.info(), t = performance.now();
+    // per-second figures, worked out once a second
+    const dt = prev && prev.t ? (t - prev.t) / 1000 : 0, fresh = !prev || dt >= 1;
+    const rates = fresh ? (dt ? { rollbacks: ((i.rollbacks - prev.i.rollbacks) / dt).toFixed(1), packets: ((i.packets - prev.i.packets) / dt).toFixed(0) } : {}) : prev.rates;
+    const rate = (k) => (rates[k] !== undefined ? rates[k] : '-');
+    const lines = [
+      `input delay ${i.delay} ticks (${Math.round(i.delay * 1000 / AB.TPS)} ms)   rollback limit ${i.maxRoll}`,
+      `confirmed ${i.behind} ticks behind   time offset ${i.offset.toFixed(1)}`,
+      `rollbacks ${rate('rollbacks')}/s  depth ${i.lastDepth} (max ${i.maxDepth})`,
+      `stalls ${i.stalls}  waits ${i.waits}  catch-ups ${i.catchups}  packets ${rate('packets')}/s`,
+    ];
+    for (const l of NP.links()) {
+      const r = NP.routeOf(l.conn);
+      const ping = l.ping ? Math.round(l.ping) + ' ms' : r && r.rtt ? Math.round(r.rtt) + ' ms' : '';
+      lines.push(`${l.name}: ${ping}  ${l.via}${r && r.route ? ' (' + r.route + ')' : ''}`);
+    }
+    if (NP.netsim) lines.push(`netsim: ${NP.netsim.oneway}+${NP.netsim.jitter} ms, ${Math.round(NP.netsim.loss * 100)}% loss`);
+    return { lines, keep: fresh ? { t, i, rates } : prev };
+  };
   // a round is being played right now (inputs flow): only then does silence from a computer mean it's gone
   NM.roundLive = () => !!NM.session && SC.name() === 'game';
 

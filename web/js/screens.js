@@ -33,6 +33,7 @@
   };
   SC.start = SC.go;
   SC.name = () => curName;
+  SC.current = () => cur;
   SC.tick = function () {
     frame++;
     const presses = I.takePresses();
@@ -513,6 +514,7 @@
       AB.curGame = this.g;
       this.devices = M.players.map(p => p.control.startsWith('key') ? { type: 'key', n: +p.control.slice(3) } : p.control.startsWith('joy') ? { type: 'joy', n: +p.control.slice(3) } : null);
       this.t = 0; this.overT = 0; this.paused = false; this.quitAsk = false; this.stallT = 0; this.desync = false; this.forfeitAsk = 0;
+      this.held = []; this.deathShown = {}; this.netStats = null;
       this.session = net ? AB.netmatch.makeSession(this.g, this.devices, net) : null;
       const track = AB.gameTrack(S, level);
       if (track) A.music(track); else A.stopMusic();
@@ -537,6 +539,7 @@
       if (k.code === 'Escape' || (k.code === 'KeyQ' && k.ctrl)) { this.quitAsk = true; return; }
       // no pause or forced draw in a network game (every computer must stay in step); F10 twice forfeits
       if (this.net) {
+        if (k.code === 'F9') this.showNet = !this.showNet;
         if (k.code === 'F10') {
           if (this.forfeitAsk > 0) { this.forfeitAsk = 0; AB.netmatch.forfeitAll(); }
           else if (this.g.players.some((p, i) => p.alive && this.session && this.session.localSlots.includes(i))) this.forfeitAsk = 2 * AB.TPS;
@@ -553,35 +556,66 @@
       if (this.forfeitAsk > 0) this.forfeitAsk--;
       { const n = g.startDelay > 0 ? Math.ceil(g.startDelay / AB.TPS) : 0; if (n !== this.lastCount) { if (n > 0) A.play(1300); this.lastCount = n; } }
       if (this.session) {
-        // lockstep: advance only when every computer's input for the next tick is here. Inputs are
-        // always queued `delay` ticks ahead, so only a queue clearly longer than that means this
-        // computer has fallen behind the others; then it runs one extra tick per frame to catch up.
+        // rollback (js/net.js): the session runs the game on, correcting it when the others' real
+        // inputs arrive. Its events are new ones only; deaths wait until they can't be undone.
         const s = this.session;
-        let steps = 0;
-        while (steps < 2 && !this.desync) {
-          if (!s.update()) break;
-          steps++;
-          for (const e of g.events) this.onEvent(e);
-          if (s.desync) { this.desync = true; console.warn('desync', s.desync); }
-          if (s.backlog() < s.delay + 2) break;
+        if (!this.desync) s.frame();
+        if (s.desync && !this.desync) { this.desync = true; console.warn('desync', s.desync); }
+        for (const e of s.takeEvents()) {
+          if (e.t === 'death' || e.t === 'taunt' || e.t === 'forfeit' || e.t === 'alienkill' || e.death) this.held.push(e);
+          else this.onEvent(e);
         }
-        this.stallT = steps ? 0 : this.stallT + 1;
+        const conf = s.confirmedTick;
+        this.held = this.held.filter((e) => {
+          if (e.tick > conf) return true;
+          // still true after any corrections? (the victim is dead, and died about then)
+          const v = e.of !== undefined ? e.of : e.slot, p = g.players.find(q => q.slot === v);
+          if (p && !p.alive && Math.abs(p.deathTick - e.tick) <= 3) this.onEvent(e);
+          return false;
+        });
+        this.stallT = s.stalled ? this.stallT + 1 : 0;
       } else {
         if (this.paused || this.quitAsk || AB.debugFreeze) return;
         const inputs = this.devices.map(d => I.read(d));
         g.step(inputs);
         for (const e of g.events) this.onEvent(e);
       }
-      if (g.state === 'over') {
+      // (network: only once the end can't be undone any more)
+      if (g.state === 'over' && (!this.session || this.session.confirmedTick >= g.overAt)) {
         // the winner gets to run around for a few seconds; a forced draw (F10) ends right away
         const r = g.result, wait = r.forced ? 0.25 : AB.match.campaign ? 2.5 : r.draw ? 2.5 : 5;
         if (++this.overT > AB.TPS * wait) this.finish();
-      }
+      } else if (this.session) this.overT = 0;
     },
     onEvent(e) {
       if (e.t === 'snd') { if (e.lo === e.hi) A.play(e.lo); else A.playRange(e.lo, e.hi); }
       else if (e.t === 'taunt') setTimeout(() => A.playRange(700, 999), 500);
       else if (e.t === 'death') { if (340 + e.anim <= 349) A.play(340 + e.anim); }
+    },
+    // network round: draw the game as this computer knows it for sure. A death the others' inputs could
+    // still undo shows the player standing until it's certain; then the death animation starts. Players
+    // moved by a correction slide to where they belong instead of jumping (js/net.js smooth).
+    drawNet(ctx) {
+      const g = this.g, s = this.session, conf = s.confirmedTick, undo = [];
+      g.players.forEach((p, i) => {
+        if (!p.alive && p.deathTick > conf) { undo.push([p, 'alive', p.alive]); p.alive = true; return; }
+        if (!p.alive) {
+          const k = p.slot, d = this.deathShown[k];
+          if (!d || d.tick !== p.deathTick) this.deathShown[k] = { tick: p.deathTick, at: g.tick };
+          const late = this.deathShown[k].at - p.deathTick;
+          if (late > 0) {
+            const dieT = Math.max(0, p.dieT - late);
+            undo.push([p, 'dieT', p.dieT], [p, 'dieY', p.dieY]);
+            if (p.dieT > 0) p.dieY = p.dieY * dieT / p.dieT;
+            p.dieT = dieT;
+          }
+          return;
+        }
+        const o = s.smooth[i];
+        if (o && (o[0] || o[1])) { undo.push([p, 'x', p.x], [p, 'y', p.y]); p.x += Math.round(o[0]); p.y += Math.round(o[1]); }
+      });
+      try { AB.render.draw(ctx, g, this.t); }
+      finally { for (let k = undo.length - 1; k >= 0; k--) undo[k][0][undo[k][1]] = undo[k][2]; }
     },
     finish() {
       const g = this.g, M = AB.match, res = g.result;
@@ -605,7 +639,7 @@
       if (res.draw) SC.go('draw'); else SC.go('results');
     },
     render(ctx) {
-      AB.render.draw(ctx, this.g, this.t);
+      if (this.session) this.drawNet(ctx); else AB.render.draw(ctx, this.g, this.t);
       const M = AB.match;
       if (M && M.campaign) {
         // enemies left in this campaign stage
@@ -620,6 +654,12 @@
         const g = this.g, n = Math.ceil(g.startDelay / AB.TPS), frac = (g.startDelay % AB.TPS) / AB.TPS;
         G.titleText(ctx, AB.levelName(g.level), 320, 200, 52, 560);
         G.titleText(ctx, String(n), 320, 322, 76 + Math.round(30 * frac), 200, 0.8 + 0.2 * frac);
+      }
+      if (this.session && this.showNet) {
+        const st = AB.netmatch.statsLines(this.netStats);
+        this.netStats = st.keep;
+        panel(ctx, 4, 40, 400, 12 + st.lines.length * 13, 0.75);
+        st.lines.forEach((l, i) => G.text(ctx, l, 10, 46 + i * 13, i < 4 ? WHITE : CYAN, 'font0'));
       }
       if (this.session && this.stallT > 20) {
         const who = this.session.missing().map(i => this.g.players[i] && this.g.players[i].name).filter(Boolean);
@@ -676,12 +716,23 @@
 
   AB.matchWinner = () => matchWinner();
   SC.register('results', {
-    enter() { this.t = 0; A.music('lose', false); this.winner = matchWinner(); },
+    enter() { this.t = 0; A.music('lose', false); this.winner = matchWinner(); this.pick = null; },
     key(k) {
       if (this.t < 30) return;
       if (AB.match && AB.match.net) {
-        if (isBack(k) && k.pad === undefined && !AB.netplay.isHost()) { AB.netmatch.quit(); return; }
-        if ((isOK(k) || isBack(k)) && AB.netplay.isHost()) AB.netmatch.hostContinue(this.winner);
+        const NM = AB.netmatch, host = AB.netplay.isHost();
+        // a member's sound list (after a few presses): up/down choose, bomb sends, Esc closes it
+        if (!host && this.pick !== null) {
+          const n = NM.NUDGE_SOUNDS.length;
+          if (k.code === 'ArrowUp') { this.pick = (this.pick + n - 1) % n; A.play(20); }
+          else if (k.code === 'ArrowDown') { this.pick = (this.pick + 1) % n; A.play(21); }
+          else if (isOK(k)) NM.nudge(this.pick);
+          else if (isBack(k)) this.pick = null;
+          return;
+        }
+        if (isBack(k) && k.pad === undefined && !host) { NM.quit(); return; }
+        if ((isOK(k) || isBack(k)) && host) NM.hostContinue(this.winner);
+        else if (isOK(k) && NM.nudge() >= 3) this.pick = 0;      // only the host moves on: say so
         return;
       }
       if (isOK(k) || isBack(k)) {
@@ -711,6 +762,8 @@
         const y = row[1] + i * row[2];
         const won = res && res.winner && res.winner.players.includes(p.slot);
         miniHead(ctx, p.color, row[0] - 16, y);
+        const nd = M.net && AB.netmatch.nudgeOf(p);
+        if (nd) drawNudge(ctx, row[0] - 44, y + 7, nd);
         let line = AB.msg(31, 'Player %u score: %u (kills: %d)').replace('%u', p.slot + 1).replace('%u', M.wins[p.slot] || 0).replace('%d', M.kills[p.slot] || 0);
         if (netName(p.slot)) line = line.replace(AB.msg(33, 'Player %u').replace('%u', p.slot + 1), netName(p.slot));
         G.text(ctx, line, row[0], y, won ? YELLOW : WHITE, 'font1');
@@ -720,11 +773,31 @@
           miniHead(ctx, p.color, 429 + k * 20, y + 1);
         }
       });
-      if (M.net && !AB.netplay.isHost()) { if (this.t > 30) centerText(ctx, 'Waiting for the host...   (Esc: leave the network game)', 440, GREY, 'font0'); }
+      if (M.net && !AB.netplay.isHost() && this.pick !== null) {
+        const list = AB.netmatch.NUDGE_SOUNDS, x = 424, y = 162, h = 15;
+        panel(ctx, x, y, 210, 30 + list.length * h, 0.88);
+        G.text(ctx, 'Send the others a sound:', x + 10, y + 7, YELLOW, 'font0');
+        list.forEach((s, i) => G.text(ctx, (i === this.pick ? '> ' : '  ') + s[0], x + 10, y + 24 + i * h, i === this.pick ? WHITE : GREY, 'font0'));
+        if (this.t > 30) centerText(ctx, 'Waiting for the host...   Up/Down: pick a sound   Bomb: send   Esc: close', 440, GREY, 'font0');
+      } else if (M.net && !AB.netplay.isHost()) { if (this.t > 30) centerText(ctx, 'Waiting for the host...   (Esc: leave the network game)', 440, GREY, 'font0'); }
       else if (this.t > 30 && blink()) centerText(ctx, this.winner ? 'Press bomb to continue' : M.net ? 'Press bomb for the next round' : 'Press bomb for the next round   (Esc: quit match)', 440, WHITE, 'font0');
     },
   });
 
+  // a "come on!" marker by a player whose computer keeps pressing to go on: pops on each press, then fades
+  function drawNudge(ctx, x, y, nd) {
+    const age = (performance.now() - nd.at) / 1000, pop = Math.max(0, 1 - age / 0.4);
+    const r = 7 + 3 * pop, a = Math.max(0.55, 1 - age / 2);
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = nd.n > 2 ? '#ff6030' : '#f8d848';
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + r * 0.5, y + r * 0.7); ctx.lineTo(x + r + 3, y + r + 3); ctx.lineTo(x + r * 0.9, y + r * 0.2); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.font = `bold ${Math.round(r * 1.5)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('!', x, y + 1);
+    ctx.restore();
+    if (nd.n > 1) G.text(ctx, 'x' + nd.n, x - 30, y - 5, nd.n > 2 ? ORANGE : YELLOW, 'font0');
+  }
   SC.register('victory', {
     enter(w) {
       this.w = w; this.t = 0;

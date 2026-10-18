@@ -1,7 +1,7 @@
 // Atomic Bomberman HTML5 port - deterministic game simulation.
 //
 // The simulation is a pure function of (settings, seed, per-tick inputs): it never reads the clock,
-// the DOM or Math.random. That makes it suitable for lockstep network play (see js/net.js).
+// the DOM or Math.random. That makes it suitable for rollback network play (see js/net.js).
 // Mechanics follow the original BM95.EXE (decompiled with angr/radare2) and its VALUELST.RES values:
 //   - movement in 1-pixel steps with perpendicular auto-centering and corner sliding (fcn.0041ec84)
 //   - multi-direction input prefers open directions (fcn.0041e61e)
@@ -54,6 +54,7 @@
 
   const idx = (x, y) => y * COLS + x;
 
+  const STATE_SKIP = new Set(['cfg', 'S', 'scheme', 'rng', 'events', 'camp']);
   class Game {
     // cfg: {settings, scheme(obj), level, seed, players:[{slot,color,team,ai:boolean,name}], match:{wins:[],kills:[]}}
     constructor(cfg) {
@@ -918,13 +919,13 @@
       p.dieAnim = 1 + this.rng.int(Math.max(1, V(105, 24)));
       if (p.held >= 0) { const b = this.bombs[p.held]; if (b && !b.dead) { b.motion = 0; b.cx = AB.cellX(p.x); b.cy = AB.cellY(p.y); b.x = AB.cellCenterX(b.cx); b.y = AB.cellCenterY(b.cy); b.holder = -1; if (this.bombAt[idx(b.cx, b.cy)] < 0) this.bombAt[idx(b.cx, b.cy)] = b.i; } p.held = -1; }
       p.deathTick = this.tick;
-      this.snd(300, 301);
+      this.events.push({ t: 'snd', lo: 300, hi: 301, death: true, slot: p.slot });     // (network play holds death sounds until certain)
       this.ev({ t: 'death', slot: p.slot, anim: p.dieAnim });
       if (killerSlot !== undefined && killerSlot >= 0 && !crushed && this.state !== 'over') {
         const k = this.pById(killerSlot);
         if (k) {
           if (k === p) k.kills--; else k.kills++;
-          if (k !== p && this.rng.chance(K.TAUNT)) this.ev({ t: 'taunt', slot: k.slot });
+          if (k !== p && this.rng.chance(K.TAUNT)) this.ev({ t: 'taunt', slot: k.slot, of: p.slot });
         }
       }
       // all collected powerups fly out across the map
@@ -1110,10 +1111,28 @@
     }
     endRound(winner, draw) {
       if (this.state === 'over') return;
-      this.state = 'over';
+      this.state = 'over'; this.overAt = this.tick;
       this.result = { winner, draw: !!draw || !winner, kills: this.players.map(p => ({ slot: p.slot, kills: p.kills })) };
       if (this.camp) { this.result.cleared = !!winner && !draw; this.result.fail = !this.result.cleared; }
       this.ev({ t: 'roundover', result: this.result });
+    }
+    // ---- save / restore (rollback netcode) ----
+    // Everything that changes during play, as a structured-clone-able object. Config (cfg, settings,
+    // scheme) is shared, the RNG keeps just its state, and caches (fields starting with _) are dropped:
+    // a restored game recomputes them, so it behaves exactly like one that never rolled back.
+    saveState() {
+      const o = {};
+      for (const k in this) if (!STATE_SKIP.has(k) && k[0] !== '_') o[k] = this[k];
+      o.rng = this.rng.s;
+      return structuredClone(o);
+    }
+    loadState(st) {
+      const c = structuredClone(st), r = c.rng;
+      delete c.rng;
+      for (const k in this) if (k[0] === '_') delete this[k];
+      Object.assign(this, c);
+      this.rng.s = r;
+      this.events = [];
     }
     // force a draw (F10 in the original)
     forceDraw() { this.events.length = 0; this.endRound(null, true); if (this.result) this.result.forced = true; }

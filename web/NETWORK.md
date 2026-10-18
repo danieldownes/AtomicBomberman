@@ -45,9 +45,18 @@ needs no server of its own, so it works from GitHub Pages as it is.
 * **Only computer players left:** HURRY sounds, and 3 seconds later the walls close in four times
   as fast and keep going until the arena is full. This applies whether the humans died, forfeited or
   left. If an AI's kill leaves a single player standing, that's an ordinary win.
+* **F9** shows the network figures: input delay, how far behind the confirmed game is, rollbacks
+  per second and how deep they go, stalls, and how this computer reaches each of the others
+  (direct, through the host, or through the TURN relay).
 * Between rounds only the host continues to the next round. The others see "Waiting for the
-  host...".
-* If a computer falls behind, the others wait for it and show "Waiting for <name>...".
+  host...". If they press bomb anyway, they get the original's "not allowed" sound, and the host
+  and the rest hear it too, with a "!" marker (and the count) by that computer's players. From the
+  third press on, a list of 15 sounds opens (hurry-ups, poops, disease groans, a couple of
+  taunts): Up/Down picks one, bomb sends it to everyone, Esc closes the list.
+* Long distances play smoothly: each computer runs on with a guess for the others' keys and
+  corrects itself when the real ones arrive (see *Rollback* below). Only if a computer's input
+  stops arriving altogether (for about a quarter of a second or more) does the game hold and show
+  "Waiting for <name>...".
 * Keep the game in the front tab. Browsers throttle background tabs, which holds everyone up.
   A computer that sends no input for 20 seconds during a round is dropped. On the results screen
   between rounds only the pings count, so the host can take as long as it likes.
@@ -80,7 +89,7 @@ needs no server of its own, so it works from GitHub Pages as it is.
   * Or Metered's [Open Relay](https://www.metered.ca/tools/openrelay/): 20 GB a month on a free
     account, with its key in the public `js/netconfig.js`.
   * Once a relay is set up, the lobby says "relay ready".
-  * A relayed computer uses about 70 MB per hour of play (about 9 KB/s each way). Only computers that
+  * A relayed computer uses about 55 MB per hour of play (7-8 KB/s each way). Only computers that
     can't link directly use the relay.
 
 Checked from a home connection in October 2026: the PeerJS server answered in about 3 seconds, and two
@@ -100,15 +109,24 @@ with "Could not reach the room host (a strict network may need a relay)."
   * A host answers with the room's info and then pushes updates every second.
   * If nobody holds the id, the server reports `peer-unavailable` and the room shows as empty.
     That takes about 5 seconds, so a room reads "checking..." at first. Enter works on it anyway.
-* **Star topology.** As with the original's IPX host, every member connects only to the host, and
-  the host relays everything to the others. Messages are JSON on a reliable, ordered data channel.
+* **Connections.** Between each member and the host there are two data channels:
+  * a reliable, ordered one for JSON messages (room state, pings, round start, drops, checksums,
+    nudges). The host relays these to the others, as with the original's IPX host;
+  * a **game channel** for the input packets: binary (`serialization: 'raw'`), unordered and never
+    resent (`maxRetransmits: 0`; PeerJS's own "unreliable" only drops the ordering, so the port
+    sets this on unordered channels). A resent input would come too late to matter, and every packet
+    repeats all inputs the others haven't confirmed, so a lost one costs nothing.
+  * Members also open game channels to each other (a mesh: of each pair, the one that joined first
+    calls), so their inputs don't make the detour through the host. They tell the host which links
+    are up (`mesh`), and the host passes packets on only between members without one. Until a game
+    channel is open, packets go over the reliable channel as `g {d}`.
 * **Leaving.** A host that leaves frees the room's id at once.
   * PeerJS fires its "disconnected" event from inside `destroy()`, so the port never reconnects a
     peer it is closing (`closePeer`). Earlier, that left a ghost holding the room, and re-hosting or
     rejoining failed.
   * A lobby whose link to the matchmaking server has dropped reconnects. After 10 seconds it starts
     over with a new connection.
-* **Compatibility.** Lockstep needs the same game code on every computer.
+* **Compatibility.** Rollback needs the same game code on every computer.
   * A deployed build carries its commit hash (see the root README's *Versions*). A host turns away
     a computer on another commit: "The host has v1.0.9, you have v1.0.8: the older one should
     reload". The lobby shows the same warning on the room.
@@ -123,43 +141,81 @@ with "Could not reach the room host (a strict network may need a relay)."
 | `room {info}` | host to members and probes | state, host, members, pings, settings (every second and on change) |
 | `welcome {id}` / `reject {reason}` | host to joiner | accepted, or why not (version, in a game, full) |
 | `ping {ts}` / `pong {ts}` | host and member | round trip every second; the shown ping is smoothed |
-| `start {cfg}` | host to members | one round: number, seed, arena, rules, players (slot, name, owner computer, AI), input delay |
+| `start {cfg}` | host to members | one round: number, seed, arena, rules, players (slot, name, owner computer, AI), computers, input delay, rollback limit |
 | `ready {round}` | member to host | arena loaded |
-| `go {round}` | host to members | everyone has loaded the arena picture and sound effects (or 45 s passed): start the clock |
-| `ls {r, m}` | member to host to others | a lockstep message (`in` inputs or `sum` checksum) for round `r` |
-| `drop {round, slots, from}` | host to members | those players need no more input from tick `from` |
+| `go {round}` | host to members | everyone has loaded the arena picture and sound effects (or 45 s passed): start the clock. The host starts half its worst ping later, so all start together |
+| `ls {r, m:{t:'sum', tick, h}}` | each to all (via host) | checksum of a confirmed tick of round `r` |
+| `drop {round, c, from, fill}` | host to members | computer `c` has left: its players are AIs (or out) from tick `from`; `fill` is the host's copy of its last inputs |
+| `mesh {ids}` | member to host | the members it has a direct game channel with |
+| `g {d}` | any (via host) | an input packet, while no game channel is open |
+| `nudge {n, pick}` | member to host to others | pressed bomb on the results screen (`pick`: a sound from the list, or -1) |
 | `victory` | host to members | the match is won: show the victory screen |
 | `end {reason?}` | host to members | match over, back to the room; with a reason, the room has closed |
 | `leave` | member to host | leaving (also sent when the tab closes) |
 
-## Lockstep (js/net.js)
+## Rollback (js/net.js)
+
+Until October 2026 the port used plain lockstep: a tick ran only once every computer's input for it
+had arrived, with an input delay of half the ping plus 30 ms. Between Europe and Asia (300 ms ping)
+that meant about 200 ms between pressing a key and seeing it, and a freeze every time a packet came
+late. Now it uses **rollback**, the way fighting games do it:
 
 * **Pure simulation.** `AB.Game` never reads the clock, the DOM, `Math.random` or devices.
-  * One `game.step(inputs)` is 1/60 s. `inputs[i]` is a 6-bit mask for player `i`.
+  * One `game.step(inputs)` is 1/60 s. `inputs[i]` is a bit mask for player `i`.
   * AI players are computed inside `step()` from the shared state and seeded RNG, so nothing is
-    sent for them.
-  * Only input bits travel: about one byte per human player per tick.
-* **Input delay.** Local input for tick `t` is scheduled for `t + delay`.
-  * The host sets the delay each round from the worst ping: `ceil((ping/2 + 30 ms) / 16.7 ms)`,
-    kept between 3 and 14 ticks (50–233 ms).
-* **Stalls.** A tick runs only once every remote player's input for it has arrived.
-* **Catch-up.** Inputs are always queued `delay` ticks ahead. So only a queue at least two ticks
-  longer than that means a computer has fallen behind, for example after a hiccup. That computer
-  then runs two ticks per frame until it has caught up. Otherwise the game runs at the normal
-  60 ticks a second, the same speed as local play.
-* **Desync checks.** Every 60 ticks each computer sends `game.checksum()`, and any mismatch
-  stops the round with a message. (It never happened in testing.)
-* **Rounds.** Lockstep messages carry their round number. Early ones are kept until that round
-  starts, and late ones from the last round are dropped.
-* **Drops.** The host relays a member's inputs before anything else it sends about that member,
-  and the channels are ordered. So when a member is lost, every computer has received the same
-  inputs from it.
-  * The host cuts at the tick after the last input it relayed, or the current tick if that is
-    later.
-  * From that tick every computer turns those players into AIs, or kills them.
+    sent for them. Only input bits travel: one byte per human player per tick.
+  * `game.saveState()` / `loadState()` copy the whole simulation (7-14 KB, about 0.1 ms).
+* **Short input delay.** Local input for tick `t` is used at `t + delay`. The host picks the delay
+  each round from the worst ping: 1 tick under 80 ms, 2 under 200 ms, 3 under 350 ms, else 4
+  (17-67 ms). `?netdelay=N` overrides it for testing.
+* **Guess, then correct.** When another computer's input for a tick hasn't arrived, the game uses
+  its last one (players mostly keep holding the same keys; forfeit is never guessed). The state is
+  saved every tick. When the real input arrives and differs from the guess, the game goes back to
+  that tick, applies it, and runs forward to now again, all before the next frame is drawn. The
+  outcome is exactly what lockstep gives (same inputs at the same ticks), so death checks and bomb
+  timings are never "compensated" or approximated: they are simply decided by the real inputs.
+* **Rollback limit.** The game runs at most `maxRollback` ticks beyond the last tick it has
+  everyone's input for (15-30, from the slowest path). Past that it holds ("Waiting for ...").
+  Going back 15 ticks costs about 5 ms with ten players.
+* **What you see.**
+  * Sounds and effects of re-run ticks are matched against what was already played, so nothing
+    plays twice. A real event the guess missed plays late.
+  * A death waits until it is *confirmed* (the inputs up to that tick are final), so nobody is seen
+    dying and then coming back. The player stands still meanwhile, a few frames at most.
+  * A player moved by a correction slides to the right place over a few frames instead of jumping.
+  * The round ends (and scores count) only once the end itself is confirmed.
+* **Time sync.** Every packet carries the sender's tick. Each computer measures "their tick when
+  sent minus my tick on arrival" for each other one, and they swap the figures; half the difference
+  is how far ahead one is, with the latency cancelled out. A computer more than 2 ticks ahead
+  skips an occasional frame, one that has fallen behind (a background tab, a hiccup) runs extra
+  ticks, so all run at 60 ticks a second together.
+* **Packets** (type 1 direct, 2 passed on by the host), binary:
+  `u8 type, u8 round, u8 source, u8 computers, u32 sender's tick`, then per computer
+  `u32 newest tick I have all of its inputs up to, i16 lead x8`, then
+  `u32 first tick, u16 count, u8 players`, and `count x players` input bytes: everything since the
+  oldest tick some other computer hasn't confirmed. Sent every frame: about 7-8 KB/s each way.
+* **Final ticks.** The host decides when a computer has left, so a member's input only counts as
+  final once the host has it too. A tick whose inputs are all final can't change any more.
+* **Desync checks.** Every 60 ticks the checksum of the final state goes to everyone, and any
+  mismatch stops the round with a message. (It never happened in testing.)
+* **Drops.** When a computer leaves, the host cuts it off at the tick after the last input of it the
+  host has, and sends its copy of the last inputs along. Every computer then turns those players
+  into AIs (or kills them) inside the game at that tick, rolling back to it if needed.
+* **Testing.** `?netsim=oneway,jitter,loss` (ms, ms, 0..1) on each computer delays incoming
+  messages and drops game packets, e.g. `?netsim=150,20,0.02` on both for a 300 ms ping.
+  `AB.net.selfTest()` (browser console, or `test/` in Node) runs three computers through a host with
+  latency, jitter, loss and a drop, and compares every confirmed checksum with a plain run of the
+  same inputs.
 
-`AB.net.selfTest()` (browser console) runs two sessions in one page with three ticks of latency and
-checks that both end with the same checksum.
+Measured with two browsers on `?netsim=<oneway>,20,0.02` (both moving the whole time, 25 s):
+
+| Ping | Old lockstep input delay | Input delay now | Rollbacks | Average depth | Frames held in 25 s | Speed |
+|---|---|---|---|---|---|---|
+| 120 ms | 100 ms, freezes on late packets | 33 ms | 1.5-3 a second | 1-2 ticks | 0 | 60 ticks/s |
+| 320 ms | 200 ms, freezes on late packets | 50 ms | about 3 a second | 5-7 ticks | 3-4 | 60 ticks/s |
+| 520 ms | 233 ms, freezes on late packets | 67 ms | about 3 a second | 11 ticks | 4-8 | 60 ticks/s |
+
+Most of the held frames come at the start of a round, during the 3-2-1, while the clocks line up.
 
 ## Relay and server settings
 

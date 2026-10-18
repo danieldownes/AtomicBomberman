@@ -34,6 +34,7 @@ Other keys:
 * Esc: back, or quit the match
 * P: pause
 * F10: force a draw (in a network game, press it twice to forfeit the round)
+* F9: network figures (network games only)
 * F1: help for the current screen
 * M: mute music
 * F11: fullscreen
@@ -71,8 +72,12 @@ There is nothing to install or host.
   Everyone sees the choices as they change.
 * Up to five computers and ten players can play, as in the original. Team play and the Gold
   Bomberman roulette are off online.
-* Every computer runs the same simulation in lockstep, and only key presses are sent. If someone
-  leaves, their players carry on as computer players.
+* Every computer runs the same simulation, and only key presses are sent. Each computer guesses
+  the others' keys until they arrive and corrects itself (rollback), so play stays smooth even at
+  a 300-500 ms ping. F9 shows the network figures. If someone leaves, their players carry on as
+  computer players.
+* On the results screen only the host goes on. Pressing bomb there tells everyone you're waiting;
+  after a few presses you can pick one of 15 sounds to send them.
 * F10 twice gives up the round for the players on your computer. Once only computer players are
   left, HURRY sounds, and 3 seconds later the walls close in four times as fast and fill the arena.
   An AI that wins by knocking out the last other player just wins.
@@ -183,7 +188,7 @@ js/render.js        drawing with the original sprites
 js/screens.js       menus, results, victory, roulette, online manual, credits, intro movie
 js/screens2.js      Sounds & Voices browser, Arenas, Campaign Mode
 js/gfx.js, audio.js, input.js
-js/net.js           lockstep session: input delay, stalls, checksums, drop-outs (see NETWORK.md)
+js/net.js           rollback session: prediction, re-simulation, time sync, checksums, drop-outs (see NETWORK.md)
 js/netplay.js       network rooms over PeerJS/WebRTC: hosting, joining, pings, relaying
 js/netscreens.js    the network lobby and room screens, and the match controller
 js/netconfig.js     optional relay (TURN) and matchmaking server settings (empty by default)

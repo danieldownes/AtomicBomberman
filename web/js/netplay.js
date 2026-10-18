@@ -5,8 +5,14 @@
 //    direct route exists. (PeerJS's own default TURN hosts no longer exist, so they aren't used.)
 //
 // Three fixed rooms. The first computer to enter a room becomes its host by claiming the room's
-// well-known peer id; others connect to that id. The host relays everything (star topology, like the
-// original's IPX host): room state, pings, and the lockstep input messages of js/net.js.
+// well-known peer id; others connect to that id. Two connections per pair of computers:
+//  - a reliable one (JSON): room state, pings, round start/ready/go, drops, checksums; the host relays it,
+//  - a game channel (binary, unordered, never resent: a late input is worthless, and every packet
+//    repeats what the others haven't confirmed yet) carrying the inputs of js/net.js. Members also open
+//    game channels to each other (mesh), so their inputs don't take the detour through the host; until
+//    one is open, or if it can't be, the host passes the packets on.
+//
+// ?netsim=oneway,jitter,loss  (ms, ms, 0..1) delays incoming messages, to try bad connections locally.
 //
 // Overrides for testing or your own servers (see NETWORK.md):
 //   ?peerserver=host:port   use a self-hosted PeerServer (http)      ?ice=none   no STUN/TURN (LAN tests)
@@ -14,7 +20,7 @@
 'use strict';
 (function (AB) {
   const NP = AB.netplay = {};
-  NP.PROTO = 1;
+  NP.PROTO = 2;
   NP.ROOMS = 3;
   NP.MAX_PLAYERS = 10;
   NP.MAX_COMPUTERS = 5;            // like the original
@@ -74,7 +80,7 @@
   NP.loadLib = function () {
     if (window.Peer && libP) return libP;
     if (!libP) libP = script('js/netconfig.js').catch(() => {})
-      .then(() => Promise.all([window.Peer ? null : script('js/vendor/peerjs.min.js'), resolveIce()]))
+      .then(() => Promise.all([window.Peer ? null : script('js/vendor/peerjs.min.js'), resolveIce()])).then(patchChannels)
       .catch((e) => { libP = null; throw new Error('could not load PeerJS'); });
     return libP;
   };
@@ -88,6 +94,38 @@
     o.config = rtcConfig();
     return o;
   }
+  // PeerJS's "unreliable" channel is only unordered: lost packets are still resent, which is pointless
+  // for the game channel. Make unordered data channels never resend.
+  let dcPatched = false;
+  function patchChannels() {
+    if (dcPatched || !window.RTCPeerConnection) return;
+    dcPatched = true;
+    const P = RTCPeerConnection.prototype, orig = P.createDataChannel;
+    P.createDataChannel = function (label, opts) {
+      if (opts && opts.ordered === false && opts.maxRetransmits === undefined && opts.maxPacketLifeTime === undefined) opts = Object.assign({}, opts, { maxRetransmits: 0 });
+      return orig.call(this, label, opts);
+    };
+  }
+  // ?netsim: a worse connection, for testing. Applied when messages arrive; reliable ones keep their order.
+  const SIM = (() => {
+    const v = (AB.params || new URLSearchParams(location.search)).get('netsim');
+    if (!v) return null;
+    const [oneway, jitter, loss] = v.split(',').map(Number);
+    return { oneway: oneway || 0, jitter: jitter || 0, loss: loss || 0 };
+  })();
+  NP.netsim = SIM;
+  function recv(handler, lossy) {
+    if (!SIM) return handler;
+    let last = 0;
+    return (data) => {
+      if (lossy && Math.random() < SIM.loss) return;
+      let at = now() + SIM.oneway + Math.random() * SIM.jitter;
+      if (!lossy) { at = Math.max(at, last); last = at; }
+      setTimeout(() => handler(data), Math.max(0, at - now()));
+    };
+  }
+  const GAME_OPTS = (meta) => ({ reliable: false, serialization: 'raw', metadata: Object.assign({ role: 'game' }, meta) });
+  const toBytes = (d) => (d instanceof ArrayBuffer ? new Uint8Array(d) : ArrayBuffer.isView(d) ? new Uint8Array(d.buffer, d.byteOffset, d.byteLength) : Array.isArray(d) ? Uint8Array.from(d) : null);
   const makePeer = (id) => (id ? new window.Peer(id, peerOptions()) : new window.Peer(peerOptions()));
   // PeerJS emits 'disconnected' from inside destroy(), before the peer counts as destroyed, so a plain
   // "reconnect when disconnected" handler would bring a destroyed room back to life as a ghost that
@@ -128,6 +166,7 @@
       }
     });
     keepConnected(peer, () => { if (L.peer === peer) L.status = 'connecting'; });
+    peer.on('connection', (c) => meshAccept(c));
   };
   function startProbing() {
     clearInterval(lobbyTimer);
@@ -257,7 +296,7 @@
       n: room.n, state: room.state, hostName: room.members[0] && room.members[0].name, ais: room.ais, aiLevel: room.aiLevel,
       aiColours: cols.slice(cols.length - room.ais),
       ver: AB.VERSION.text, commit: AB.VERSION.commit,
-      members: room.members.map(m => ({ id: m.id, name: m.name, ping: Math.round(m.ping || 0), players: m.players.map(p => ({ name: p.name, color: cols[k++] })) })),
+      members: room.members.map(m => ({ id: m.id, name: m.name, peer: m.peer, ping: Math.round(m.ping || 0), players: m.players.map(p => ({ name: p.name, color: cols[k++] })) })),
       settings: NP.matchSettings(),
     };
   }
@@ -275,12 +314,13 @@
 
   function hostAccept(room, c) {
     room.probes = room.probes || [];
+    if (c.metadata && c.metadata.role === 'game') { hostGameChannel(room, c); return; }
     let member = null;
-    c.on('data', (m) => {
+    c.on('data', recv((m) => {
       if (!m || typeof m !== 'object') return;
       if (m.t === 'hello') {
         if (m.role === 'probe') { room.probes.push(c); c.send({ t: 'room', info: roomInfo(room) }); return; }
-        // lockstep needs the same game code everywhere: builds from different commits can't play together
+        // rollback needs the same game code everywhere: builds from different commits can't play together
         // (a dev copy, with no commit, is only held to the protocol number)
         const reason = m.v !== NP.PROTO ? 'That room runs a different version of the game.'
           : NP.versionClash(m.commit) ? `The host has ${AB.VERSION.text}, you have ${m.ver || 'another build'}: the older one should reload.`
@@ -290,7 +330,7 @@
         if (reason) { c.send({ t: 'reject', reason }); setTimeout(() => c.close(), 500); return; }
         member = { id: 'p' + Math.random().toString(36).slice(2, 8), name: String(m.name || 'Bomberman').slice(0, 20),
                    players: (m.players || []).slice(0, 4).map(p => ({ name: String(p.name).slice(0, 20), control: String(p.control), color: AB.clamp(p.color | 0, 0, 9) })),
-                   ping: 0, conn: c, lastSeen: now(), lastTick: 0, ready: false };
+                   ping: 0, conn: c, lastSeen: now(), ready: false, peer: typeof m.peer === 'string' ? m.peer : null, game: null, direct: new Set() };
         room.members.push(member);
         room.ais = Math.min(room.ais, NP.MAX_PLAYERS - humanCount(room));
         c.send({ t: 'welcome', id: member.id });
@@ -300,19 +340,52 @@
       if (!member) return;
       member.lastSeen = now();
       if (m.t === 'pong') { const rtt = now() - m.ts; member.ping = member.ping ? member.ping * 0.7 + rtt * 0.3 : rtt; }
-      else if (m.t === 'ls') {
-        const cur = AB.netmatch && AB.netmatch.cfg ? AB.netmatch.cfg.round : 0;
-        if (m.m && m.m.t === 'in' && m.r === cur) { member.lastTick = Math.max(member.lastTick, m.m.tick); member.lastInput = now(); }
-        hostBroadcast(room, m, member);
-        emit({ t: 'ls', r: m.r, m: m.m });
-      } else if (m.t === 'ready') { member.ready = m.round; emit({ t: 'ready' }); }
+      else if (m.t === 'ls') { hostBroadcast(room, m, member); emit({ t: 'ls', r: m.r, m: m.m }); }
+      else if (m.t === 'g') { const b = toBytes(m.d); if (b) hostGamePacket(room, member, b); }      // (no game channel yet)
+      else if (m.t === 'mesh') { member.direct = new Set(Array.isArray(m.ids) ? m.ids : []); }
+      else if (m.t === 'ready') { member.ready = m.round; emit({ t: 'ready' }); }
+      else if (m.t === 'nudge') { const n = { t: 'nudge', id: member.id, n: m.n | 0, pick: m.pick | 0 }; hostBroadcast(room, n, member); emit(n); }
       else if (m.t === 'leave') { c.close(); }
-    });
+    }));
     c.on('close', () => {
       room.probes = (room.probes || []).filter(x => x !== c);
       if (member) hostRemove(room, member, 'left');
     });
     c.on('error', () => {});
+  }
+  // a member's game channel to the host
+  function hostGameChannel(room, c) {
+    const id = c.metadata.id;
+    c.on('open', () => {
+      const member = room.members.find(m => m.id === id);
+      if (!member || NP.room !== room) { try { c.close(); } catch (e) {} return; }
+      if (member.game && member.game !== c) try { member.game.close(); } catch (e) {}
+      member.game = c;
+    });
+    c.on('data', recv((d) => {
+      const member = room.members.find(m => m.id === id), b = toBytes(d);
+      if (member && b) hostGamePacket(room, member, b);
+    }, true));
+    c.on('close', () => { const member = room.members.find(m => m.id === id); if (member && member.game === c) member.game = null; });
+    c.on('error', () => {});
+  }
+  // host: a member's input packet. Use it, and pass it on to the members it has no direct link with.
+  function hostGamePacket(room, member, b) {
+    member.lastInput = now(); member.lastSeen = now();
+    if (AB.netmatch) AB.netmatch.onGamePacket(b);
+    let fwd = null;
+    for (const m of room.members) {
+      if (m === member || m.id === 'host' || member.direct.has(m.id) || m.direct.has(member.id)) continue;
+      if (!fwd) { fwd = b.slice(); fwd[0] = 2; }
+      sendGameTo(m, fwd);
+    }
+  }
+  // host -> member: over the game channel, or the reliable connection while it isn't open
+  function sendGameTo(m, b) {
+    try {
+      if (m.game && m.game.open) m.game.send(b);
+      else if (m.conn && m.conn.open) m.conn.send({ t: 'g', d: Array.from(b) });
+    } catch (e) {}
   }
   function hostRemove(room, member, why) {
     if (!room.members.includes(member)) return;
@@ -320,6 +393,7 @@
     room.say(member.name + (why === 'timeout' ? ' lost connection.' : ' left.'));
     if (room.state === 'playing') emit({ t: 'memberLost', member });
     try { member.conn.close(); } catch (e) {}
+    if (member.game) try { member.game.close(); } catch (e) {}
     sendRoom(room);
   }
   function startHostTimers(room) {
@@ -348,20 +422,74 @@
       const c = L.peer.connect(NP.roomPeerId(n), { reliable: true, serialization: 'json', metadata: { role: 'join' } });
       room.conn = c;
       const to = setTimeout(() => room.fail(NP.relay === 'relay' ? 'Could not reach the room host.' : 'Could not reach the room host (a strict network may need a relay).'), 15000);
-      c.on('open', () => c.send({ t: 'hello', v: NP.PROTO, role: 'join', name: AB.settings.netName, players: localPlayers(), commit: AB.VERSION.commit, ver: AB.VERSION.text }));
-      c.on('data', (m) => {
+      c.on('open', () => c.send({ t: 'hello', v: NP.PROTO, role: 'join', name: AB.settings.netName, players: localPlayers(), commit: AB.VERSION.commit, ver: AB.VERSION.text, peer: L.peer.id }));
+      c.on('data', recv((m) => {
         if (!m || typeof m !== 'object') return;
         room.lastSeen = now();
         if (m.t === 'reject') { clearTimeout(to); room.fail(m.reason); return; }
-        if (m.t === 'welcome') { clearTimeout(to); done = true; room.connecting = false; room.me = m.id; room.say('Joined room ' + n + '.'); startMemberTimer(room); res(room); return; }
-        if (m.t === 'room') { room.info = m.info; room.state = m.info.state; room.members = m.info.members; room.ais = m.info.ais; room.aiLevel = m.info.aiLevel || 'hard'; emit({ t: 'room' }); return; }
+        if (m.t === 'welcome') { clearTimeout(to); done = true; room.connecting = false; room.me = m.id; room.say('Joined room ' + n + '.'); startMemberTimer(room); openHostGame(room); res(room); return; }
+        if (m.t === 'room') { room.info = m.info; room.state = m.info.state; room.members = m.info.members; room.ais = m.info.ais; room.aiLevel = m.info.aiLevel || 'hard'; emit({ t: 'room' }); updateMesh(room); return; }
         if (m.t === 'ping') { c.send({ t: 'pong', ts: m.ts }); return; }
+        if (m.t === 'g') { const b = toBytes(m.d); if (b && AB.netmatch) AB.netmatch.onGamePacket(b); return; }
         if (m.t === 'ls') { emit({ t: 'ls', r: m.r, m: m.m }); return; }
         emit(m);     // start / go / drop / next / end / kicked
-      });
-      c.on('close', () => { clearTimeout(to); if (!done) room.fail('The room closed.'); else if (NP.room === room) { NP.room = null; emit({ t: 'hostLost' }); } });
+      }));
+      c.on('close', () => { clearTimeout(to); closeGameLinks(room); if (!done) room.fail('The room closed.'); else if (NP.room === room) { NP.room = null; emit({ t: 'hostLost' }); } });
       c.on('error', () => {});
     }));
+  }
+  // member: the game channel to the host (reopened if it closes)
+  function openHostGame(room) {
+    if (NP.room !== room || !L.peer || L.peer.destroyed) return;
+    const c = L.peer.connect(NP.roomPeerId(room.n), GAME_OPTS({ id: room.me }));
+    room.game = c;
+    c.on('data', recv((d) => { const b = toBytes(d); if (b && AB.netmatch) AB.netmatch.onGamePacket(b); }, true));
+    const retry = () => { if (room.game === c) room.game = null; if (NP.room === room && !room.closing) setTimeout(() => { if (NP.room === room && !room.game) openHostGame(room); }, 3000); };
+    c.on('close', retry); c.on('error', () => {});
+    setTimeout(() => { if (room.game === c && !c.open) { try { c.close(); } catch (e) {} retry(); } }, 15000);
+  }
+  // member: direct game channels to the other members. Of each pair, the one that joined first calls.
+  function updateMesh(room) {
+    room.links = room.links || new Map();
+    const list = room.members || [], i = list.findIndex(m => m.id === room.me);
+    if (i < 0) return;
+    for (const [id, l] of room.links) if (!list.some(m => m.id === id)) { try { l.c.close(); } catch (e) {} room.links.delete(id); }
+    list.forEach((m, j) => {
+      if (j <= i || m.id === 'host' || !m.peer || room.links.has(m.id) || !L.peer || L.peer.destroyed) return;
+      const last = (room.meshTried = room.meshTried || {})[m.id] || 0;
+      if (now() - last < 10000) return;
+      room.meshTried[m.id] = now();
+      addLink(room, m.id, L.peer.connect(m.peer, GAME_OPTS({ id: room.me, room: room.n })));
+    });
+  }
+  function addLink(room, id, c) {
+    room.links = room.links || new Map();
+    const old = room.links.get(id);
+    if (old && old.c !== c) try { old.c.close(); } catch (e) {}
+    const l = { c, id };
+    room.links.set(id, l);
+    c.on('open', () => reportMesh(room));
+    c.on('data', recv((d) => { const b = toBytes(d); if (b && AB.netmatch) AB.netmatch.onGamePacket(b); }, true));
+    c.on('close', () => { if (room.links.get(id) === l) { room.links.delete(id); reportMesh(room); } });
+    c.on('error', () => {});
+    setTimeout(() => { if (room.links.get(id) === l && !c.open) { try { c.close(); } catch (e) {} } }, 15000);
+  }
+  // incoming direct game channel from another member of my room
+  function meshAccept(c) {
+    const md = c.metadata || {}, room = NP.room;
+    if (md.role !== 'game' || !room || room.host || md.room !== room.n || !(room.members || []).some(m => m.id === md.id)) { setTimeout(() => { try { c.close(); } catch (e) {} }, 100); return; }
+    addLink(room, md.id, c);
+  }
+  function reportMesh(room) {
+    if (NP.room !== room || !room.conn || !room.conn.open) return;
+    const ids = [...(room.links || new Map()).values()].filter(l => l.c.open).map(l => l.id);
+    try { room.conn.send({ t: 'mesh', ids }); } catch (e) {}
+  }
+  function closeGameLinks(room) {
+    room.closing = true;
+    if (room.game) try { room.game.close(); } catch (e) {}
+    for (const l of (room.links || new Map()).values()) try { l.c.close(); } catch (e) {}
+    if (room.links) room.links.clear();
   }
   function startMemberTimer(room) {
     clearInterval(roomTimer);
@@ -382,7 +510,7 @@
       room.peer._abClosing = true;
       setTimeout(() => { for (const m of room.members) if (m.conn) try { m.conn.close(); } catch (e) {} closePeer(room.peer); }, 200);
       const lr = L.rooms[room.n - 1]; lr.state = 'checking'; lr.t = now();      // probe it again once the id is free
-    } else if (room.conn) { try { room.conn.send({ t: 'leave' }); } catch (e) {} setTimeout(() => { try { room.conn.close(); } catch (e) {} }, 100); }
+    } else if (room.conn) { try { room.conn.send({ t: 'leave' }); } catch (e) {} closeGameLinks(room); setTimeout(() => { try { room.conn.close(); } catch (e) {} }, 100); }
   };
   // closing the tab: say goodbye so the others don't sit waiting for the time-out
   window.addEventListener('pagehide', () => {
@@ -401,6 +529,40 @@
     const room = NP.room; if (!room) return;
     if (room.host) hostBroadcast(room, msg);
     else if (room.conn && room.conn.open) try { room.conn.send(msg); } catch (e) {}
+  };
+  // an input packet (js/net.js) to every other computer: direct where there is a link, else via the host
+  NP.sendGame = function (b) {
+    const room = NP.room; if (!room) return;
+    if (room.host) { for (const m of room.members) if (m.id !== 'host') sendGameTo(m, b); return; }
+    try {
+      if (room.game && room.game.open) room.game.send(b);
+      else if (room.conn && room.conn.open) room.conn.send({ t: 'g', d: Array.from(b) });
+    } catch (e) {}
+    for (const l of (room.links || new Map()).values()) if (l.c.open) try { l.c.send(b); } catch (e) {}
+  };
+  // for the F9 overlay: how this computer reaches each of the others
+  NP.links = function () {
+    const room = NP.room; if (!room) return [];
+    if (room.host) return room.members.slice(1).map(m => ({ name: m.name, ping: m.ping, conn: m.game && m.game.open ? m.game : null, via: m.game && m.game.open ? 'game channel' : 'reliable' }));
+    const out = [{ name: 'host', ping: (room.members.find(m => m.id === room.me) || {}).ping, conn: room.game && room.game.open ? room.game : null, via: room.game && room.game.open ? 'game channel' : 'reliable' }];
+    for (const m of room.members) if (m.id !== 'host' && m.id !== room.me) { const l = room.links && room.links.get(m.id); out.push({ name: m.name, conn: l && l.c.open ? l.c : null, via: l && l.c.open ? 'direct' : 'via host' }); }
+    return out;
+  };
+  // whether a connection goes through the TURN relay (asks the browser; cached on the connection)
+  NP.routeOf = function (conn) {
+    if (!conn || !conn.peerConnection) return null;
+    if (!conn._abRouteAt || now() - conn._abRouteAt > 3000) {
+      conn._abRouteAt = now();
+      conn.peerConnection.getStats().then((st) => {
+        let pair = null; const by = {};
+        st.forEach((r) => { by[r.id] = r; if (r.type === 'transport' && r.selectedCandidatePairId) pair = r.selectedCandidatePairId; });
+        if (!pair) st.forEach((r) => { if (r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') pair = r.id; });
+        const p = by[pair], loc = p && by[p.localCandidateId], rem = p && by[p.remoteCandidateId];
+        conn._abRoute = loc ? ((loc.candidateType === 'relay' || (rem && rem.candidateType === 'relay')) ? 'relay' : loc.candidateType === 'host' ? 'local' : 'direct') : null;
+        conn._abRtt = p && p.currentRoundTripTime ? p.currentRoundTripTime * 1000 : null;
+      }).catch(() => {});
+    }
+    return { route: conn._abRoute || null, rtt: conn._abRtt || null };
   };
   NP.setState = (st) => { if (NP.room && NP.room.host) { NP.room.state = st; sendRoom(NP.room); } };
 
@@ -423,8 +585,14 @@
       }
       for (let i = 0; i < room.ais && players.length < NP.MAX_PLAYERS; i++) players.push({ slot: players.length, color: cols[players.length], team: 0, ai: true, aiLevel: room.aiLevel, name: 'Computer ' + (i + 1), owner: null, control: 'ai' });
     }
-    const maxPing = Math.max(0, ...room.members.map(m => m.ping || 0));
-    const delay = AB.clamp(Math.ceil((maxPing / 2 + 30) / (1000 / AB.TPS)), 3, 14);
+    // input delay from the worst ping: a little delay saves a lot of corrections (js/net.js)
+    const pings = room.members.slice(1).map(m => m.ping || 0).sort((a, b) => b - a), maxPing = pings[0] || 0;
+    const q = AB.params || new URLSearchParams(location.search);
+    const delay = q.get('netdelay') ? AB.clamp(+q.get('netdelay') | 0, 0, 10) : maxPing < 80 ? 1 : maxPing < 200 ? 2 : maxPing < 350 ? 3 : 4;
+    // how far the game may run on guesses: the slowest path (member to member through the host, at worst)
+    const worstOneWay = (pings.length > 1 ? (pings[0] + pings[1]) / 2 : maxPing / 2);
+    const maxRollback = AB.clamp(Math.ceil(worstOneWay / (1000 / AB.TPS)) - delay + 10, 15, 30);
+    const computers = room.members.map(m => m.id);
     const sim = {};
     for (const k of ['conveyorSpeed', 'diseasesDestroyable', 'enclosement', 'playTime', 'randomStart', 'stompedDetonate',
                      'winsNeeded', 'winByKills', 'lostNetToAI', 'scheme']) sim[k] = S[k];
@@ -432,6 +600,6 @@
     sim.countdown = S.countdown !== false;      // one of the host's ticked schemes for this round
     sim.teamPlay = false; sim.goldBomberman = false;
     sim.aiFinale = true;           // only computer players left: fast walls (js/game.js updateAIFinale)
-    return { round, seed: (Math.random() * 0xffffffff) >>> 0, level: AB.pickArena(S), sim, players, delay, aiLevel: room.aiLevel };
+    return { round, seed: (Math.random() * 0xffffffff) >>> 0, level: AB.pickArena(S), sim, players, delay, maxRollback, computers, aiLevel: room.aiLevel };
   };
 })(window.AB);
