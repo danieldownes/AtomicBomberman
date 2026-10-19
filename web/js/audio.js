@@ -50,7 +50,17 @@
     if (on === A.presetOn(preset, e, n)) delete overrides[k]; else overrides[k] = on ? 1 : 0;
     selDirty = true;
   };
+  // a network match plays the host's preset and variety on every computer (no own ticks), so all hear
+  // the same sounds; null goes back to this computer's own settings
+  let forced = null;
+  A.forceProfile = function (p) {
+    forced = p && A.PRESETS.includes(p.preset) ? { preset: p.preset, variety: MULT[p.variety] !== undefined ? p.variety : 'normal' } : null;
+    if (forced) { preset = forced.preset; overrides = {}; variety = forced.variety; selDirty = true; }
+    else A.configure(AB.settings);
+  };
+  A.forced = () => forced;
   A.configure = function (S) {
+    if (forced) return;
     preset = A.PRESETS.includes(S.voices) ? S.voices : 'extended';
     overrides = S.soundOverrides || (S.soundOverrides = {});
     variety = S.soundVariety || 'normal';
@@ -117,24 +127,31 @@
   A.VARIETY_LABEL = { few: 'Few (half)', normal: 'Normal', lots: 'Lots (double)', all: 'Everything ticked' };
   let roundSel = null, selDirty = true;
   const KEEP = new Set();                    // clips the menus need (never unloaded)
-  function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = AB.crand(i + 1); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
-  function pickFor(e) {
+  // R: random 0..n-1 (cosmetic by default; a seeded one makes every computer pick the same)
+  function shuffle(a, R = AB.crand) { for (let i = a.length - 1; i > 0; i--) { const j = R(i + 1); const t = a[i]; a[i] = a[j]; a[j] = t; } return a; }
+  function pickFor(e, R = AB.crand) {
     const groups = [];
     for (const g of e.groups) { const on = g.clips.filter(n => A.isOn(e, n)); if (on.length) groups.push(on); }
     const m = MULT[variety];
     if (!m) return groups.flat();                     // "everything ticked"
     const lim = !e.limit ? Infinity : Math.max(2, Math.round(e.limit * m));
-    shuffle(groups);
+    shuffle(groups, R);
     const out = [];
-    for (const takes of groups.slice(0, lim)) out.push(takes[AB.crand(takes.length)]);
+    for (const takes of groups.slice(0, lim)) out.push(takes[R(takes.length)]);
     // few phrases on: add more takes of them so repeats still vary
-    if (groups.length < lim) for (const takes of groups) for (const n of shuffle(takes.slice())) if (!out.includes(n) && out.length < Math.min(lim, 24)) out.push(n);
+    if (groups.length < lim) for (const takes of groups) for (const n of shuffle(takes.slice(), R)) if (!out.includes(n) && out.length < Math.min(lim, 24)) out.push(n);
     return out;
   }
-  // choose this round's sounds; returns a promise that resolves once they are loaded
-  A.newRound = function (onProgress) {
+  // a number from a string (FNV-1a): the same key gives the same pick on every computer
+  const hash = (k) => { let h = 0x811c9dc5; for (const ch of String(k)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 0x01000193) >>> 0; } return h >>> 0; };
+  A.hash = hash;
+  // choose this round's sounds; returns a promise that resolves once they are loaded. With a seed (a
+  // network round's), every computer chooses the same ones.
+  A.newRound = function (onProgress, seed) {
     roundSel = {};
-    for (const e of EV) roundSel[e.lo] = pickFor(e);
+    const rng = seed !== undefined && seed !== null ? new AB.Rng(hash('sounds:' + seed)) : null;
+    const R = rng ? (n) => rng.int(n) : AB.crand;
+    for (const e of EV) roundSel[e.lo] = pickFor(e, R);
     selDirty = false;
     const want = new Set(Object.values(roundSel).flat());
     for (const n of KEEP) want.add(n);
@@ -238,23 +255,71 @@
     if (e && !A.isOn(e, n.toLowerCase())) return;
     A.playName(n.toLowerCase(), vol);
   };
-  // play a random sound for an id range [lo, hi]: this round's picks for the matching events
-  A.playRange = function (lo, hi, vol) {
+  // play a random sound for an id range [lo, hi]: this round's picks for the matching events. With a
+  // key (network rounds: the event's tick and place), the pick comes from the key, so every computer
+  // plays the same take, even one whose clip is still loading (it then plays late or not at all).
+  A.playRange = function (lo, hi, vol, key) {
     const evs = evOverlap(lo, hi);
     if (!evs.length) return;
-    if (selDirty && roundSel) for (const e of evs) roundSel[e.lo] = pickFor(e);
+    if (selDirty && roundSel && !forced) for (const e of evs) roundSel[e.lo] = pickFor(e);
     let c = [];
     for (const e of evs) {
       const sel = roundSel ? roundSel[e.lo] : null;
       if (sel) c.push(...sel); else c.push(...e.clipList.filter(n => A.isOn(e, n)));
     }
     if (!c.length) return;
+    if (key !== undefined && key !== null) { A.playName(c[hash(key) % c.length], vol); return; }
     const ready = c.filter(A.isLoaded);
     A.playName((ready.length ? ready : c)[AB.crand((ready.length ? ready : c).length)], vol);
   };
   A.rangeCount = function (lo, hi) { let k = 0; for (const id of ids) if (id >= lo && id <= hi) k++; return k; };
   // a random ticked take of a phrase / event (menu preview)
   A.sampleOf = function (e, list) { const on = list.filter(n => A.isOn(e, n)); const l = on.length ? on : list; return l[AB.crand(l.length)]; };
+
+  // ---- echo-safe output (voice chat) ----
+  // Browsers cancel the echo of what a page plays from the microphone, but Chrome only does that for
+  // audio played through <audio>/<video> elements, not for Web Audio, which plays every game sound.
+  // While voice chat has the microphone, the game sounds therefore take a detour: Web Audio -> a
+  // WebRTC connection to this same page -> an <audio> element, so they are cancelled like the voices.
+  // (Music already plays through an <audio> element.) It adds a few hundredths of a second.
+  let loop = null;
+  A.echoSafe = () => !!(loop && loop.live);
+  A.setEchoSafe = function (on) {
+    if (on) {
+      if (loop || !window.RTCPeerConnection) return;
+      A.unlock(); if (!ctx || !ctx.createMediaStreamDestination) return;
+      const L = loop = { live: false };
+      L.dest = ctx.createMediaStreamDestination();
+      L.pc1 = new RTCPeerConnection(); L.pc2 = new RTCPeerConnection();
+      L.pc1.onicecandidate = (e) => { if (e.candidate) L.pc2.addIceCandidate(e.candidate).catch(() => {}); };
+      L.pc2.onicecandidate = (e) => { if (e.candidate) L.pc1.addIceCandidate(e.candidate).catch(() => {}); };
+      L.el = document.createElement('audio'); L.el.autoplay = true; L.el.style.display = 'none'; document.body.appendChild(L.el);
+      // switch the game's output over only once sound comes out the other end
+      L.pc2.ontrack = (e) => {
+        L.el.srcObject = e.streams[0] || new MediaStream([e.track]);
+        L.el.play().catch(() => {});
+        const go = () => { if (loop !== L || L.live) return; L.live = true; try { sfxGain.disconnect(); } catch (x) {} sfxGain.connect(L.dest); };
+        if (L.pc2.connectionState === 'connected') go();
+        L.pc2.onconnectionstatechange = () => { if (L.pc2.connectionState === 'connected') go(); else if (['failed', 'closed'].includes(L.pc2.connectionState)) A.setEchoSafe(false); };
+      };
+      for (const t of L.dest.stream.getAudioTracks()) L.pc1.addTrack(t, L.dest.stream);
+      // full-quality stereo for music-like effects (the default is set for speech)
+      const hifi = (sdp) => sdp.replace(/a=fmtp:(\d+) ([^\r\n]*minptime[^\r\n]*)/g, (m, pt, rest) => `a=fmtp:${pt} ${rest};stereo=1;sprop-stereo=1;maxaveragebitrate=256000`);
+      (async () => {
+        try {
+          const offer = await L.pc1.createOffer(); await L.pc1.setLocalDescription(offer); await L.pc2.setRemoteDescription(offer);
+          const ans = await L.pc2.createAnswer(); ans.sdp = hifi(ans.sdp);
+          await L.pc2.setLocalDescription(ans); await L.pc1.setRemoteDescription(ans);
+        } catch (e) { console.warn('echo-safe output:', e.message); A.setEchoSafe(false); }
+      })();
+      setTimeout(() => { if (loop === L && !L.live) { console.warn('echo-safe output: no connection, game sounds play directly'); A.setEchoSafe(false); } }, 5000);
+    } else if (loop) {
+      const L = loop; loop = null;
+      if (L.live && ctx) { try { sfxGain.disconnect(); } catch (x) {} sfxGain.connect(ctx.destination); }
+      try { L.pc1.close(); L.pc2.close(); } catch (x) {}
+      L.el.srcObject = null; L.el.remove();
+    }
+  };
 
   // ---- music ----
   A.music = function (name, loop = true) {

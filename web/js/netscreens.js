@@ -68,6 +68,29 @@
     '   leaves, the room closes.',
     '',
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    'Voice chat',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    ' - In a room everyone hears everyone else, in the room, between',
+    '   rounds and while playing. The browser asks once for the',
+    '   microphone; without it you still hear the others.',
+    ' - V mutes or unmutes your microphone (in the room and in game).',
+    '   A speaker by a name, or over a bomberman, shows who speaks.',
+    ' - Voice chat in the room menu: on or off, the microphone, the',
+    '   voice gate (sends only while you speak; set its level with the',
+    '   meter), the volume of everyone and of each person.',
+    ' - "Keep game sounds out" lets the browser cancel the game sounds',
+    '   from your microphone like the voices. Headphones are best.',
+    ' - Voices go straight between the computers (or through the relay',
+    '   when there is no direct route), like the game itself.',
+    '',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    'Sounds',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
+    ' - The host picks the sound set and variety for everyone in Match',
+    '   settings. Every computer then plays the very same take of each',
+    '   sound. Your own Sounds & Voices choices are back after the match.',
+    '',
+    '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     'Connections',
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     'Computers connect to each other directly (WebRTC), and the free',
@@ -121,16 +144,16 @@
     const s = NM.session;
     if (s && b.length > 1 && b[1] === s.round) s.onPacket(b);
   };
-  NM.reset = function () { NM.nudges = {}; NM.session = null; NM.cfg = null; NM.pending = []; NM.goRound = 0; NM.myReady = 0; NM.forfeitSlots = null; if (AB.match && AB.match.net) AB.match = null; };
+  NM.reset = function () { AB.audio.forceProfile(null); NM.nudges = {}; NM.session = null; NM.cfg = null; NM.pending = []; NM.goRound = 0; NM.myReady = 0; NM.forfeitSlots = null; if (AB.match && AB.match.net) AB.match = null; };
   // a drop may arrive before this computer has started the round it belongs to: keep it until then
   // a message over the top of the game (or results) screen for a few seconds: who dropped out, who's back
   NM.banner = null;
-  NM.say = function (text) { NM.banner = { text, at: performance.now() }; };
+  NM.say = function (text, secs = 8) { NM.banner = { text, at: performance.now(), secs }; };
   NM.drawBanner = function (ctx) {
     const b = NM.banner; if (!b) return;
     const age = (performance.now() - b.at) / 1000;
-    if (age > 8) { NM.banner = null; return; }
-    ctx.save(); ctx.globalAlpha = Math.min(1, (8 - age) / 0.8);
+    if (age > b.secs) { NM.banner = null; return; }
+    ctx.save(); ctx.globalAlpha = Math.min(1, (b.secs - age) / 0.8);
     ctx.fillStyle = 'rgba(20,10,0,0.9)'; ctx.fillRect(0, 0, 640, 44);
     ctx.fillStyle = ORANGE; ctx.fillRect(0, 43, 640, 1);
     // up to two lines of font0
@@ -161,11 +184,12 @@
     const S = Object.assign({}, AB.settings, cfg.sim);
     const M = AB.match = first ? { net: true, wins: {}, kills: {}, round: 0, players: [], demo: false } : AB.match;
     if (first && cfg.score) { M.wins = Object.assign({}, cfg.score.wins); M.kills = Object.assign({}, cfg.score.kills); }
-    M.round = cfg.round; M.S = S; M.over = false;
+    M.round = cfg.round; M.S = S; M.over = false; M.soundSeed = cfg.seed;
+    AB.audio.forceProfile(cfg.sim.sound || null);       // the host's sounds, the same on every computer
     M.players = cfg.players.map(p => Object.assign({}, p, { control: p.ai ? 'ai' : p.owner === me ? p.control : 'net' }));
     NM.cfg = cfg; NM.session = null; NM.nudges = {};
     for (const m of (NP.room ? NP.room.members : [])) m.ready = false;
-    SC.go('glue', { level: cfg.level, scheme: cfg.sim.scheme, net: cfg.round, then: () => SC.go('game', { net: cfg }) });
+    SC.go('glue', { level: cfg.level, scheme: cfg.sim.scheme, net: cfg.round, soundSeed: cfg.seed, then: () => SC.go('game', { net: cfg }) });
   };
   // after loading: tell the host; the host starts everyone together once all are loaded (or after 12 s)
   NM.ready = function (round) {
@@ -318,6 +342,7 @@
       const ping = l.ping ? Math.round(l.ping) + ' ms' : r && r.rtt ? Math.round(r.rtt) + ' ms' : '';
       lines.push(`${l.name}: ${ping}  ${l.via}${r && r.route ? ' (' + r.route + ')' : ''}`);
     }
+    { const V = AB.voice; lines.push(`voice: ${!V.active() ? 'off' : (MIC_TEXT[V.mic] || V.mic) + (V.muted ? ', muted' : '') + ', hearing ' + V.remoteIds().filter(id => V.remoteState(id) === 'connected').length}${AB.audio.echoSafe() ? ', game sounds kept out' : ''}`); }
     if (NP.netsim) lines.push(`netsim: ${NP.netsim.oneway}+${NP.netsim.jitter} ms, ${Math.round(NP.netsim.loss * 100)}% loss`);
     return { lines, keep: fresh ? { t, i, rates } : prev };
   };
@@ -532,22 +557,28 @@
     if (set.conveyor !== undefined) {
       L.push(`Random start: ${yn(set.randomStart)}   Conveyors: ${convName(set.conveyor)}   Stomped bombs detonate: ${yn(set.stomped)}`);
       L.push(`Hurry walls: ${AB.msg(315 + set.enclosement, String(set.enclosement))}   Diseases destroyable: ${yn(set.diseases)}   Leavers become AIs: ${yn(set.lostToAI)}`);
+      if (set.sound) L.push(`Sounds for everyone: ${A.PRESET_LABEL[set.sound.preset] || set.sound.preset}, variety ${(A.VARIETY_LABEL[set.sound.variety] || set.sound.variety).toLowerCase()}`);
     }
     return L;
   }
   SC.register('room', {
     help: 'portnet',
     enter() {
-      this.err = null; this.errT = 0; if (this.sel === undefined) this.sel = 3;
+      this.err = null; this.errT = 0;
       NP.leaveLobby(); A.music('menu');
       if (NP.room && NP.room.host) { NP.room.inGame = false; NP.setState('waiting'); }
+      // the host starts on START, a member on its only choice, Voice chat
+      const rows = this.rows();
+      if (this.sel === undefined || this.sel >= rows.length || !(NP.room && NP.room.host)) this.sel = rows.findIndex(r => r.k === (NP.room && NP.room.host ? 'start' : 'voice'));
     },
-    rows() { return [{ k: 'ais' }, { k: 'skill' }, { k: 'setup' }, { k: 'start' }]; },
+    // members see the host's lines greyed out, and can only open their voice settings
+    rows() { return NP.room && NP.room.host ? [{ k: 'ais' }, { k: 'skill' }, { k: 'setup' }, { k: 'voice' }, { k: 'start' }] : [{ k: 'ais' }, { k: 'skill' }, { k: 'setup' }, { k: 'voice' }]; },
     key(k) {
       const room = NP.room; if (!room) { SC.go('network'); return; }
       if (U.isBack(k) && k.pad === undefined) { NP.leave(); SC.go('network'); return; }
-      if (!room.host) return;
       const rows = this.rows(), row = rows[this.sel];
+      if (row && row.k === 'voice' && U.isOK(k)) { A.play(10); SC.go('netvoice'); return; }
+      if (!room.host) return;
       const humans = room.members.reduce((a, m) => a + m.players.length, 0);
       if (k.code === 'ArrowUp') { this.sel = (this.sel + rows.length - 1) % rows.length; A.play(20); }
       else if (k.code === 'ArrowDown') { this.sel = (this.sel + 1) % rows.length; A.play(21); }
@@ -560,7 +591,7 @@
         AB.settings.netAILevel = room.aiLevel; AB.saveSettings(); A.play(20); NP.refreshRoom();
       } else if (U.isOK(k)) {
         if (row.k === 'setup') { A.play(10); SC.go('netsetup'); return; }
-        if (row.k === 'ais') { this.sel = 3; return; }
+        if (row.k === 'ais') { this.sel = rows.findIndex(r => r.k === 'start'); return; }
         if (humans + room.ais < 2) { this.err = 'Need at least two players: wait for someone to join, or add computer players.'; this.errT = 240; A.play(40); return; }
         A.play(10); NM.hostStart(1);
       }
@@ -580,22 +611,24 @@
       const aiCols = room.host ? cols.slice(cols.length - room.ais) : (room.info && room.info.aiColours) || [];
       let slot = 0;
       room.members.forEach((m, i) => {
-        const y = 94 + i * 28, mine = m.id === room.me;
-        if (mine) { ctx.fillStyle = 'rgba(96,240,96,0.10)'; ctx.fillRect(44, y - 4, 552, 26); }
+        const y = 92 + i * 26, mine = m.id === room.me;
+        if (mine) { ctx.fillStyle = 'rgba(96,240,96,0.10)'; ctx.fillRect(44, y - 4, 552, 24); }
         G.text(ctx, fit(m.name, 150) + (i === 0 ? '  (host)' : ''), 56, y, mine ? YELLOW : WHITE, 'font1');
+        const vs = voiceIcon(m, mine);
+        if (vs) AB.voice.drawIcon(ctx, 246, y + 9, vs, U.frame());
         m.players.forEach((p, j) => { U.miniHead(ctx, cols ? cols[slot] : (p.color | 0), 268 + j * 22, y + 2); slot++; });
         G.text(ctx, fit(m.players.map(p => (typeof p === 'string' ? p : p.name)).join(', '), 250 - m.players.length * 22, 'font0'), 268 + m.players.length * 22 + 6, y + 2, GREY, 'font0');
         if (i === 0) G.text(ctx, 'host', 584, y + 2, GREY, 'font0', 2);
         else G.text(ctx, Math.round(m.ping || 0) + ' ms', 584, y + 2, pingCol(m.ping || 0), 'font0', 2);
       });
       // the host's menu (members see the same lines, greyed)
-      const ys = 98 + Math.max(room.members.length, 2) * 28 + 6;
+      const ys = 92 + Math.max(room.members.length, 2) * 26 + 4;
       const set = room.host ? NP.matchSettings() : room.info && room.info.settings;
       const rows = this.rows();
       rows.forEach((row, i) => {
-        const y = ys + i * 24, sel = room.host && i === this.sel;
-        if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.14)'; ctx.fillRect(44, y - 3, 552, 22); U.menuCursor(ctx, 50, y + 16); }
-        const col = !room.host ? GREY : sel ? YELLOW : WHITE;
+        const y = ys + i * 22, sel = i === this.sel;
+        if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.14)'; ctx.fillRect(44, y - 3, 552, 21); U.menuCursor(ctx, 50, y + 15); }
+        const col = row.k === 'voice' ? (sel ? YELLOW : WHITE) : !room.host ? GREY : sel ? YELLOW : WHITE;
         if (row.k === 'ais') {
           G.text(ctx, `Computer players: ${room.ais}`, 70, y, col, 'font1');
           for (let k = 0; k < room.ais; k++) U.miniHead(ctx, aiCols[k] !== undefined ? aiCols[k] : slot + k, 290 + k * 20, y + 2);
@@ -606,17 +639,136 @@
         } else if (row.k === 'setup') {
           G.text(ctx, room.host ? 'Match settings  >' : 'Match settings:', 70, y, col, 'font1');
           if (sel) G.text(ctx, 'Enter: change', 590, y + 2, GREY, 'font0', 2);
+        } else if (row.k === 'voice') {
+          G.text(ctx, 'Voice chat  >', 70, y, col, 'font1');
+          G.text(ctx, voiceSummary(), 230, y + 2, CYAN, 'font0');
+          if (sel) G.text(ctx, 'Enter: settings   V: mute', 590, y + 2, GREY, 'font0', 2);
         } else if (room.host) G.text(ctx, 'START THE MATCH!', 70, y, col, 'font1');
       });
+      // the match settings lines go after the host's menu (above START for members, who have none)
       const lines = settingsLines(set);
-      const ly = ys + (room.host ? 4 : 3) * 24 + 2;
-      lines.forEach((t, i) => G.text(ctx, fit(t, 540, 'font0'), 70, ly + i * 15, GREY, 'font0'));
+      const ly = ys + rows.length * 22 + 2;
+      lines.forEach((t, i) => G.text(ctx, fit(t, 540, 'font0'), 70, ly + i * 14, GREY, 'font0'));
       // recent events
-      const logY = ly + lines.length * 15 + 8;
+      const logY = ly + lines.length * 14 + 6;
       room.log.slice(-AB.clamp(Math.floor((412 - logY) / 14), 0, 4) || room.log.length).forEach((t, i) => G.text(ctx, t, 56, logY + i * 14, '#9aa', 'font0'));
-      const hint = room.host ? 'Up/Down: choose   Enter: select   Esc: close the room' : 'Esc: leave the room';
+      const hint = room.host ? 'Up/Down: choose   Enter: select   V: mute your microphone   Esc: close the room' : 'Enter: voice settings   V: mute your microphone   Esc: leave the room';
       G.text(ctx, hint, 320, 420, GREY, 'font0', 1);
       if (this.errT > 0) { U.panel(ctx, 60, 196, 520, 50, 0.92); U.centerText(ctx, fit(this.err, 500, 'font0'), 214, ORANGE, 'font0'); }
+    },
+  });
+
+  // voice chat state of a computer in the room, as an icon (js/voice.js drawIcon): talking, listening,
+  // muted (or no microphone), or none (voice chat off)
+  function voiceIcon(m, mine) {
+    const V = AB.voice;
+    if (mine) return !V.active() ? null : V.mic !== 'live' || V.muted ? 'muted' : V.open ? 'talk' : 'listen';
+    if (!m.voice) return null;
+    if (m.mic !== 'live' || m.muted) return 'muted';
+    return V.isTalking(m.id) ? 'talk' : 'listen';
+  }
+  const MIC_TEXT = { off: 'off', asking: 'asking the browser for the microphone...', live: 'microphone on', denied: 'microphone blocked by the browser', none: 'no microphone found', error: 'microphone not available' };
+  function voiceSummary() {
+    const V = AB.voice;
+    if (!V.cfg().on) return 'Off';
+    if (!V.active()) return 'On';
+    const others = V.remoteIds().filter(id => V.remoteState(id) === 'connected').length;
+    const mic = V.mic === 'live' ? (V.muted ? 'muted' : V.cfg().gate ? 'on (voice gate)' : 'on') : MIC_TEXT[V.mic] || V.mic;
+    return `On  -  ${mic}  -  hearing ${others} other${others === 1 ? '' : 's'}`;
+  }
+
+  // ================================================================= VOICE CHAT SETTINGS
+  // each player's own: on/off, the microphone, the voice gate and how loud everyone else is
+  SC.register('netvoice', {
+    help: 'portnet',
+    enter() {
+      if (this.sel === undefined) this.sel = 0;
+      this.devs = []; this.refreshDevices();
+    },
+    refreshDevices() { AB.voice.devices().then((d) => { this.devs = d; }); },
+    rows() {
+      const V = AB.voice, c = V.cfg(), r = [{ k: 'on' }];
+      if (c.on) {
+        r.push({ k: 'mic' }, { k: 'dev' }, { k: 'gate' }, { k: 'lvl' }, { k: 'vol' }, { k: 'echo' });
+        const room = NP.room, me = room ? (room.host ? 'host' : room.me) : null;
+        for (const m of (room && room.members) || []) if (m.id !== me) r.push({ k: 'who', m });
+      }
+      r.push({ k: 'done' });
+      return r;
+    },
+    key(k) {
+      const V = AB.voice, c = V.cfg(), rows = this.rows();
+      this.sel = Math.min(this.sel, rows.length - 1);
+      const row = rows[this.sel], lr = k.code === 'ArrowLeft' ? -1 : k.code === 'ArrowRight' ? 1 : 0, ok = U.isOK(k);
+      if (k.code === 'ArrowUp') { this.sel = (this.sel + rows.length - 1) % rows.length; A.play(20); return; }
+      if (k.code === 'ArrowDown') { this.sel = (this.sel + 1) % rows.length; A.play(21); return; }
+      if (U.isBack(k) || (ok && row.k === 'done')) { V.save(); SC.go(NP.room ? 'room' : 'network'); return; }
+      if (!lr && !ok) return;
+      const d = lr || 1;
+      switch (row.k) {
+        case 'on': c.on = !c.on; V.save(); if (c.on && NP.room) V.start(); else V.stop(); break;
+        case 'mic':
+          if (V.mic === 'live') V.toggleMute();
+          else { V.retryMic(); setTimeout(() => this.refreshDevices(), 1500); }
+          break;
+        case 'dev': {
+          const list = [''].concat(this.devs.map(x => x.deviceId).filter(Boolean));
+          const i = list.indexOf(c.deviceId || '');
+          V.setDevice(list[(Math.max(0, i) + d + list.length) % list.length]);
+          break;
+        }
+        case 'gate': c.gate = !c.gate; V.save(); break;
+        case 'lvl': c.gateLevel = AB.clamp(c.gateLevel + d, 1, 10); V.save(); break;
+        case 'vol': V.setVolume(c.volume + d); break;
+        case 'echo': V.setEchoSafe(!c.echoSafe); break;
+        case 'who': V.setVolumeOf(row.m.name, V.volumeOf(row.m.name) + (lr || (V.volumeOf(row.m.name) ? -10 : 10))); break;
+      }
+      A.play(20);
+    },
+    tick() { if (!NP.room) SC.go('network'); },
+    render(ctx) {
+      const V = AB.voice, c = V.cfg(), rows = this.rows();
+      U.glueDim(ctx, 5);
+      U.panel(ctx, 30, 22, 580, 420, 0.86);
+      U.centerText(ctx, 'VOICE CHAT', 34, YELLOW);
+      G.text(ctx, 'Everyone in the room hears everyone else. These settings are your own.', 320, 56, GREY, 'font0', 1);
+      const devName = () => { if (!c.deviceId) return 'Default'; const x = this.devs.find(v => v.deviceId === c.deviceId); return x ? x.label || 'Microphone' : 'Default'; };
+      rows.forEach((row, i) => {
+        const y = 78 + i * 22, sel = i === this.sel, col = sel ? YELLOW : WHITE;
+        if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.14)'; ctx.fillRect(44, y - 3, 552, 21); U.menuCursor(ctx, 50, y + 15); }
+        const L = (a, b, bc = CYAN) => { G.text(ctx, a, 70, y, col, 'font1'); if (b !== undefined) G.text(ctx, fit(b, 280, 'font1'), 300, y, sel ? YELLOW : bc, 'font1'); };
+        switch (row.k) {
+          case 'on': L('Voice chat', c.on ? 'On' : 'Off'); break;
+          case 'mic': L('Microphone', V.mic === 'live' ? (V.muted ? 'Muted (V)' : 'On') : (MIC_TEXT[V.mic] || V.mic), V.mic === 'live' && !V.muted ? CYAN : ORANGE);
+            if (sel && V.mic !== 'live') G.text(ctx, 'Enter: ask again', 590, y + 2, GREY, 'font0', 2); break;
+          case 'dev': L('Microphone device', devName()); break;
+          case 'gate': L('Voice gate', c.gate ? 'On: sends only while you speak' : 'Off: always sends'); break;
+          case 'lvl': {
+            L('Gate level', String(c.gateLevel));
+            // the microphone's level, and where the gate opens
+            const x0 = 330, w = 250, db = AB.clamp(V.levelDb(), -70, 0), thr = V.thresholdDb(c.gateLevel);
+            ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(x0, y + 3, w, 10);
+            ctx.fillStyle = V.open ? '#60f060' : '#7a8a8a'; ctx.fillRect(x0, y + 3, Math.round(w * (db + 70) / 70), 10);
+            ctx.fillStyle = YELLOW; ctx.fillRect(x0 + Math.round(w * (thr + 70) / 70) - 1, y, 2, 16);
+            break;
+          }
+          case 'vol': L('Voices volume', c.volume + ' / 10'); break;
+          case 'echo': L('Keep game sounds out', c.echoSafe ? 'On (recommended)' : 'Off'); break;
+          case 'who': {
+            const v = V.volumeOf(row.m.name), st = V.remoteState(row.m.id);
+            L('  ' + fit(row.m.name, 180, 'font1'), v ? v + ' / 10' : 'Muted', v ? CYAN : ORANGE);
+            const vs = voiceIcon(row.m, false);
+            if (vs) V.drawIcon(ctx, 286, y + 9, vs, U.frame());
+            G.text(ctx, !row.m.voice ? 'voice chat off' : st === 'connected' ? '' : 'connecting...', 590, y + 2, GREY, 'font0', 2);
+            break;
+          }
+          case 'done': G.text(ctx, 'Back to the room', 70, y, col, 'font1'); break;
+        }
+      });
+      const tip = V.mic === 'denied' ? 'Your browser blocked the microphone: allow it in the address bar, then Enter on Microphone. You still hear the others.'
+        : 'Headphones sound clearest. You are heard while the bar is green (the yellow mark is the gate).';
+      G.text(ctx, fit(tip, 560, 'font0'), 320, 398, GREY, 'font0', 1);
+      G.text(ctx, 'Up/Down: choose   Left/Right: change   Enter: toggle   Esc: back', 320, 420, GREY, 'font0', 1);
     },
   });
 
@@ -643,6 +795,9 @@
         { label: lbl(257, 'Enclosement Depth'), value: AB.msg(315 + S.enclosement), change: (d) => { S.enclosement = (S.enclosement + d + 4) % 4; } },
         { label: lbl(261, 'Diseases Can Be Destroyed'), value: yn(S.diseasesDestroyable), change: tog('diseasesDestroyable') },
         { label: lbl(262, 'Lost net players revert to AIs'), value: yn(S.lostNetToAI), change: tog('lostNetToAI') },
+        // sounds: the host's choice for everyone, and every computer picks the same takes
+        { label: 'Sounds (everyone)', value: A.PRESET_LABEL[NP.soundProfile().preset], change: (d) => { const P = A.PRESETS; S.netVoices = P[(P.indexOf(NP.soundProfile().preset) + d + P.length) % P.length]; } },
+        { label: 'Sound variety (everyone)', value: A.VARIETY_LABEL[NP.soundProfile().variety], change: (d) => { const P = A.VARIETY; S.netVariety = P[(P.indexOf(NP.soundProfile().variety) + d + P.length) % P.length]; } },
         { label: 'Back to the room', value: '', action: () => SC.go('room') },
       ];
     },
@@ -665,7 +820,7 @@
       U.centerText(ctx, 'MATCH SETTINGS  -  ROOM ' + (NP.room ? NP.room.n : ''), 34, YELLOW);
       G.text(ctx, 'Changes show up for everyone in the room straight away.', 320, 56, GREY, 'font0', 1);
       this.items().forEach((it, i) => {
-        const y = 80 + i * 24, sel = i === this.sel;
+        const y = 76 + i * 22, sel = i === this.sel;
         if (sel) U.menuCursor(ctx, 48, y + 16);
         G.text(ctx, it.label, 66, y, sel ? YELLOW : WHITE, 'font1');
         if (it.value) G.text(ctx, fit(it.value, 244), 352, y, sel ? YELLOW : CYAN, 'font1');

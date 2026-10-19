@@ -43,6 +43,11 @@
       if (k.code === 'F1' && cur.help && !saved) { SC.pushHelp(cur.help); continue; }
       // in a match, keys used by a player's layout are game input, not shortcuts
       const playerKey = curName === 'game' && I.layouts.some(L => Object.values(L).includes(k.code));
+      if (k.code === 'KeyV' && !cur.textEntry && !playerKey && AB.voice && AB.voice.active()) {
+        const m = AB.voice.toggleMute();
+        if (AB.netmatch) AB.netmatch.say(m ? 'Your microphone is muted (V to unmute).' : 'Your microphone is on (V to mute).', 2.5);
+        continue;
+      }
       if (k.code === 'KeyM' && !cur.textEntry && !playerKey) {
         AB.musicMuted = !AB.musicMuted; A.setVolumes(AB.musicMuted ? 0 : AB.settings.musicVolume, AB.settings.sfxVolume); continue;
       }
@@ -446,7 +451,7 @@
       this.img = a.level === undefined; this.fx = false; this.all = false;
       const field = a.level !== undefined ? AB.tilesets.prepare(a.level) : Promise.resolve(true);
       field.then(() => { this.img = true; });
-      const snd = A.newRound((f) => { this.prog = f; });
+      const snd = A.newRound((f) => { this.prog = f; }, a.soundSeed);      // (network rounds: the same picks everywhere)
       snd.effects.then(() => { this.fx = true; });
       snd.then(() => { this.all = true; });
       // then, quietly: the pictures the next screens show
@@ -548,14 +553,14 @@
     tick() {
       const g = this.g;
       this.t++;
-      if (this.t === 30 && !AB.match.demo) A.playRange(9000, 9000);    // round-start announcer (unused CD lines)
+      if (this.t === 30 && !AB.match.demo) A.playRange(9000, 9000, 1, this.sndKey('announce'));    // round-start announcer (unused CD lines)
       if (this.forfeitAsk > 0) this.forfeitAsk--;
       // countdown: a wall slam on each number, an explosion on "go", and then the music
       {
         const n = g.startDelay > 0 ? Math.ceil(g.startDelay / AB.TPS) : 0;
         if (n !== this.lastCount) {
-          if (n > 0) A.playRange(140, 146);
-          else if (this.lastCount > 0) A.playRange(200, 299);
+          if (n > 0) A.playRange(140, 146, 1, this.sndKey('count' + n));
+          else if (this.lastCount > 0) A.playRange(200, 299, 1, this.sndKey('go'));
           this.lastCount = n;
         }
         if (n === 0 && !this.musicOn) { this.musicOn = true; this.goTick = g.tick; if (this.track) A.music(this.track); }
@@ -592,9 +597,13 @@
         if (++this.overT > AB.TPS * wait) this.finish();
       } else if (this.session) this.overT = 0;
     },
+    // network rounds: which take of a sound plays comes from the round's seed and the event's tick and
+    // place in it, so every computer plays the same one (local rounds: random, as before)
+    sndKey(what) { return this.net ? this.net.seed + ':' + what : undefined; },
     onEvent(e) {
-      if (e.t === 'snd') { if (e.lo === e.hi) A.play(e.lo); else A.playRange(e.lo, e.hi); }
-      else if (e.t === 'taunt') setTimeout(() => A.playRange(700, 999), 500);
+      const key = this.net && e.tick !== undefined ? `${this.net.seed}:${e.tick}:${e.seq}` : undefined;
+      if (e.t === 'snd') { if (e.lo === e.hi) A.play(e.lo); else A.playRange(e.lo, e.hi, 1, key); }
+      else if (e.t === 'taunt') setTimeout(() => A.playRange(700, 999, 1, key), 500);
       else if (e.t === 'death') { if (340 + e.anim <= 349) A.play(340 + e.anim); }
     },
     // during the countdown and for a second after it: who is who, over each bomberman (a stripe in their colour)
@@ -617,6 +626,19 @@
         G.text(ctx, fitTo(name, 140), x, y, WHITE, 'font0', 1);
       }
       ctx.restore();
+    },
+    // voice chat: a speaker over the bombermen of a computer while it speaks
+    drawTalk(ctx) {
+      const V = AB.voice, M = AB.match, me = AB.netplay.myId();
+      for (const p of this.g.players) {
+        if (!p.alive) continue;
+        const mp = M.players.find(q => q.slot === p.slot), owner = mp && (mp.owner || mp.wasOwner);
+        if (!owner || mp.ai) continue;
+        if (!V.isTalking(owner, owner === me)) continue;
+        const x = Math.min(628, Math.round(p.x) + 16), y = Math.max(56, Math.round(p.y) - 50);
+        ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.arc(x + 1, y, 10, 0, Math.PI * 2); ctx.fill();
+        V.drawIcon(ctx, x, y, 'talk', this.t);
+      }
     },
     // network round: draw the game as this computer knows it for sure. A death the others' inputs could
     // still undo shows the player standing until it's certain; then the death animation starts. Players
@@ -696,7 +718,7 @@
         centerText(ctx, 'Waiting for ' + (who.length ? [...new Set(who)].join(', ') : 'the other computers') + '...', 228, YELLOW, 'font0');
         centerText(ctx, Math.floor(this.stallT / AB.TPS) + ' s', 246, GREY, 'font0');
       }
-      if (this.net) AB.netmatch.drawBanner(ctx);
+      if (this.net) { this.drawTalk(ctx); AB.netmatch.drawBanner(ctx); }
       if (this.desync) { panel(ctx, 120, 200, 400, 60, 0.92); centerText(ctx, 'The computers are out of sync.', 214, ORANGE); centerText(ctx, 'Press Esc to leave the match.', 238, WHITE, 'font0'); }
       if (this.paused) { panel(ctx, 220, 210, 200, 50, 0.85); centerText(ctx, 'PAUSED', 226, YELLOW); }
       if (this.forfeitAsk > 0) { panel(ctx, 150, 206, 340, 40, 0.88); centerText(ctx, 'Press F10 again to forfeit this round', 220, YELLOW, 'font0'); }
@@ -710,7 +732,7 @@
 
   // ================================================================= DRAW / RESULTS / VICTORY
   SC.register('draw', {
-    enter() { this.t = 0; A.music('draw', false); A.playRange(1700, 1999); },
+    enter() { this.t = 0; A.music('draw', false); A.playRange(1700, 1999, 1, AB.match && AB.match.net ? AB.match.soundSeed + ':draw' : undefined); },
     key(k) { if (this.t > 30 && (isOK(k) || isBack(k))) SC.go('results'); },
     tick() { if (++this.t > AB.TPS * 6) SC.go('results'); },
     render(ctx) { G.blit(ctx, 'draw', 0, 0); },
@@ -832,7 +854,7 @@
   SC.register('victory', {
     enter(w) {
       this.w = w; this.t = 0;
-      A.music('win', false); A.playRange(2000, 2299);
+      A.music('win', false); A.playRange(2000, 2299, 1, AB.match && AB.match.net ? AB.match.soundSeed + ':win' : undefined);
       AB.match.over = true;
     },
     key(k) {

@@ -174,6 +174,7 @@
     });
     keepConnected(peer, () => { if (L.peer === peer) L.status = 'connecting'; });
     peer.on('connection', (c) => meshAccept(c));
+    peer.on('call', (c) => voiceAccept(c));
   };
   function startProbing() {
     clearInterval(lobbyTimer);
@@ -282,6 +283,7 @@
         NP.room = room;
         const lr = L.rooms[n - 1]; if (lr.conn) try { lr.conn.close(); } catch (e) {} lr.conn = null; lr.state = 'waiting';
         startHostTimers(room);
+        AB.voice.start();
         res(room);
       });
       peer.on('error', (err) => {
@@ -290,6 +292,7 @@
       });
       keepConnected(peer);
       peer.on('connection', (c) => hostAccept(room, c));
+      peer.on('call', (c) => voiceAccept(c));
     }));
   }
 
@@ -299,7 +302,13 @@
     let arenas = 0, one = null; for (let i = 0; i < AB.LEVELS; i++) if (AB.arenaOn(S, i)) { arenas++; one = i; }
     return { scheme: AB.schemeSummary(S), arenas: arenas === 1 ? AB.levelName(one) : arenas + ' of ' + AB.LEVELS, wins: S.winsNeeded, byKills: !!S.winByKills,
              time: S.playTime, randomStart: !!S.randomStart, conveyor: S.conveyorSpeed | 0, stomped: !!S.stompedDetonate,
-             enclosement: S.enclosement | 0, diseases: !!S.diseasesDestroyable, lostToAI: !!S.lostNetToAI };
+             enclosement: S.enclosement | 0, diseases: !!S.diseasesDestroyable, lostToAI: !!S.lostNetToAI, sound: NP.soundProfile() };
+  };
+  // the sounds a network match uses on every computer: the host's choice in Match settings
+  NP.soundProfile = function () {
+    const S = AB.settings, A = AB.audio;
+    return { preset: A.PRESETS.includes(S.netVoices) ? S.netVoices : A.PRESETS.includes(S.voices) ? S.voices : 'extended',
+             variety: A.VARIETY.includes(S.netVariety) ? S.netVariety : A.VARIETY.includes(S.soundVariety) ? S.soundVariety : 'normal' };
   };
   NP.versionClash = (commit) => !!(commit && AB.VERSION.commit && commit !== AB.VERSION.commit);
   function roomInfo(room) {
@@ -310,7 +319,8 @@
       rejoin: [...(room.departed || new Map()).keys()].map(NP.cidTag),
       aiColours: cols.slice(cols.length - room.ais),
       ver: AB.VERSION.text, commit: AB.VERSION.commit,
-      members: room.members.map(m => ({ id: m.id, name: m.name, peer: m.peer, ping: Math.round(m.ping || 0), players: m.players.map(p => ({ name: p.name, color: cols[k++] })) })),
+      members: room.members.map(m => ({ id: m.id, name: m.name, peer: m.peer, ping: Math.round(m.ping || 0),
+        voice: m.id === 'host' ? AB.voice.active() : !!m.voice, mic: m.id === 'host' ? AB.voice.mic : m.mic || '', muted: m.id === 'host' ? AB.voice.muted : !!m.muted, players: m.players.map(p => ({ name: p.name, color: cols[k++] })) })),
       settings: NP.matchSettings(),
     };
   }
@@ -319,6 +329,9 @@
     for (const m of room.members) if (m.conn && m.conn.open && m !== except) try { m.conn.send(msg); } catch (e) {}
   }
   function sendRoom(room) {
+    const me = room.members[0];
+    if (me && me.id === 'host') { me.voice = AB.voice.active(); me.mic = AB.voice.mic; me.muted = AB.voice.muted; }
+    syncVoice();
     const msg = { t: 'room', info: roomInfo(room) };
     hostBroadcast(room, msg);
     for (const c of room.probes || []) if (c.open) try { c.send(msg); } catch (e) {}
@@ -367,6 +380,8 @@
       else if (m.t === 'ls') { hostBroadcast(room, m, member); emit({ t: 'ls', r: m.r, m: m.m }); }
       else if (m.t === 'g') { const b = toBytes(m.d); if (b) hostGamePacket(room, member, b); }      // (no game channel yet)
       else if (m.t === 'mesh') { member.direct = new Set(Array.isArray(m.ids) ? m.ids : []); }
+      else if (m.t === 'vstate') { member.voice = !!m.on; member.mic = String(m.mic || ''); member.muted = !!m.muted; sendRoom(room); }
+      else if (m.t === 'talk') { AB.voice.setTalking(member.id, !!m.on); hostBroadcast(room, { t: 'talk', id: member.id, on: !!m.on }, member); }
       else if (m.t === 'ready') { member.ready = m.round; emit({ t: 'ready' }); }
       else if (m.t === 'nudge') { const n = { t: 'nudge', id: member.id, n: m.n | 0, pick: m.pick | 0 }; hostBroadcast(room, n, member); emit(n); }
       else if (m.t === 'leave') { c.close(); }
@@ -454,14 +469,15 @@
         if (!m || typeof m !== 'object') return;
         room.lastSeen = now();
         if (m.t === 'reject') { clearTimeout(to); room.fail(m.reason); return; }
-        if (m.t === 'welcome') { clearTimeout(to); done = true; room.connecting = false; room.me = m.id; room.rejoin = !!m.rejoin; room.say(m.rejoin ? 'Back in room ' + n + ': you play again from the next round.' : 'Joined room ' + n + '.'); startMemberTimer(room); openHostGame(room); res(room); return; }
-        if (m.t === 'room') { room.info = m.info; room.state = m.info.state; room.members = m.info.members; room.ais = m.info.ais; room.aiLevel = m.info.aiLevel || 'hard'; emit({ t: 'room' }); updateMesh(room); return; }
+        if (m.t === 'welcome') { clearTimeout(to); done = true; room.connecting = false; room.me = m.id; room.rejoin = !!m.rejoin; room.say(m.rejoin ? 'Back in room ' + n + ': you play again from the next round.' : 'Joined room ' + n + '.'); startMemberTimer(room); openHostGame(room); AB.voice.start(); res(room); return; }
+        if (m.t === 'room') { room.info = m.info; room.state = m.info.state; room.members = m.info.members; room.ais = m.info.ais; room.aiLevel = m.info.aiLevel || 'hard'; emit({ t: 'room' }); updateMesh(room); syncVoice(); return; }
         if (m.t === 'ping') { c.send({ t: 'pong', ts: m.ts }); return; }
+        if (m.t === 'talk') { AB.voice.setTalking(m.id, !!m.on); return; }
         if (m.t === 'g') { const b = toBytes(m.d); if (b && AB.netmatch) AB.netmatch.onGamePacket(b); return; }
         if (m.t === 'ls') { emit({ t: 'ls', r: m.r, m: m.m }); return; }
         emit(m);     // start / go / drop / next / end / kicked
       }));
-      c.on('close', () => { clearTimeout(to); closeGameLinks(room); if (!done) room.fail('The room closed.'); else if (NP.room === room) { NP.room = null; emit({ t: 'hostLost' }); } });
+      c.on('close', () => { clearTimeout(to); closeGameLinks(room); if (NP.room === room || !done) AB.voice.stop(); if (!done) room.fail('The room closed.'); else if (NP.room === room) { NP.room = null; emit({ t: 'hostLost' }); } });
       c.on('error', () => {});
     }));
   }
@@ -529,6 +545,7 @@
 
   NP.leave = function () {
     const room = NP.room; NP.room = null;
+    AB.voice.stop();
     clearInterval(roomTimer); roomTimer = null;
     if (!room) return;
     if (room.host) {
@@ -547,6 +564,50 @@
       else if (room.conn && room.conn.open) room.conn.send({ t: 'leave' });
     } catch (e) {}
   });
+
+  // ---------------------------------------------------------------- voice chat (js/voice.js)
+  // One audio call per pair of computers in the room that have voice chat on: members call the host, and
+  // of two members the one that joined first calls the other (like the game's own direct links).
+  function syncVoice() {
+    const room = NP.room, V = AB.voice;
+    if (!room || !room.me || room.connecting) return;
+    const me = room.host ? 'host' : room.me, list = room.members || [];
+    for (const id of V.remoteIds()) { const m = list.find(x => x.id === id); if (!V.active() || !m || !m.voice) V.dropRemote(id); }
+    if (!V.active() || room.host) return;
+    const myIdx = list.findIndex(m => m.id === me);
+    room.voiceTried = room.voiceTried || {};
+    list.forEach((m, j) => {
+      if (m.id === me || !m.voice || V.hasRemote(m.id)) return;
+      if (m.id !== 'host' && !(myIdx >= 0 && j > myIdx)) return;     // they call me
+      if (now() - (room.voiceTried[m.id] || 0) < 8000) return;
+      const pid = m.id === 'host' ? NP.roomPeerId(room.n) : m.peer;
+      if (!pid || !L.peer || L.peer.destroyed || L.peer.disconnected) return;
+      room.voiceTried[m.id] = now();
+      const call = L.peer.call(pid, V.outStream(), { metadata: { role: 'voice', room: room.n, id: me } });
+      if (call) V.addRemote(m.id, call);
+    });
+  }
+  NP.syncVoice = syncVoice;
+  // an incoming voice call from a computer in my room
+  function voiceAccept(c) {
+    const md = c.metadata || {}, room = NP.room, V = AB.voice;
+    const ok = md.role === 'voice' && room && md.room === room.n && V.active() && (room.members || []).some(m => m.id === md.id && m.id !== (room.host ? 'host' : room.me));
+    if (!ok) { setTimeout(() => { try { c.close(); } catch (e) {} }, 100); return; }
+    c.answer(V.outStream());
+    V.addRemote(md.id, c);
+  }
+  // tell the room: voice on/off and the microphone's state (to show icons), and when this computer speaks
+  AB.voice.onState = function () {
+    const room = NP.room; if (!room) return;
+    if (room.host) sendRoom(room);
+    else if (room.conn && room.conn.open) { try { room.conn.send({ t: 'vstate', on: AB.voice.active(), mic: AB.voice.mic, muted: AB.voice.muted }); } catch (e) {} syncVoice(); }
+  };
+  AB.voice.onTalk = function (on) {
+    const room = NP.room; if (!room) return;
+    if (room.host) hostBroadcast(room, { t: 'talk', id: 'host', on });
+    else if (room.conn && room.conn.open) try { room.conn.send({ t: 'talk', on }); } catch (e) {}
+  };
+  AB.voice.nameOf = (id) => { const m = NP.room && (NP.room.members || []).find(x => x.id === id); return m ? m.name : id; };
 
   // ---------------------------------------------------------------- messages during a match
   NP.isHost = () => !!(NP.room && NP.room.host);
@@ -634,6 +695,8 @@
     sim.countdown = S.countdown !== false;      // one of the host's ticked schemes for this round
     sim.teamPlay = false; sim.goldBomberman = false;
     sim.aiFinale = true;           // only computer players left: fast walls (js/game.js updateAIFinale)
+    // the host's sound preset and variety, for everyone (js/audio.js forceProfile)
+    sim.sound = NP.soundProfile();
     return { round, seed: (Math.random() * 0xffffffff) >>> 0, level: AB.pickArena(S), sim, players, delay, maxRollback, computers, aiLevel: room.aiLevel };
   };
 })(window.AB);

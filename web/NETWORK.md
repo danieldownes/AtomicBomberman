@@ -46,6 +46,7 @@ needs no server of its own, so it works from GitHub Pages as it is.
 * **Only computer players left:** HURRY sounds, and 3 seconds later the walls close in four times
   as fast and keep going until the arena is full. This applies whether the humans died, forfeited or
   left. If an AI's kill leaves a single player standing, that's an ordinary win.
+* **Voice chat**: everyone in the room hears everyone else (see *Voice chat* below). V mutes you.
 * **F9** shows the network figures: input delay, how far behind the confirmed game is, rollbacks
   per second and how deep they go, stalls, and how this computer reaches each of the others
   (direct, through the host, or through the TURN relay).
@@ -74,6 +75,54 @@ needs no server of its own, so it works from GitHub Pages as it is.
   has ended, simply joins again as usual.
 * Later rounds keep everyone in the same slot, so scores stay with the right player.
 * If the host leaves, the room closes and everyone goes back to the lobby.
+
+## Voice chat (js/voice.js)
+
+* **In the room and in game.** As soon as you are in a room, you hear everyone else in it and they
+  hear you: in the room, between rounds and while playing. The browser asks once for the
+  microphone; without one (or if you say no) you still hear the others.
+* **V** mutes or unmutes your microphone, in the room and in game (unless V is one of your
+  keyboard layout's keys). A speaker by a name in the room, or over a bomberman, shows who is
+  talking; a crossed-out microphone, who is muted or has none.
+* **Voice chat settings** (Room > Voice chat, each player's own): voice chat on or off, the
+  microphone (and Enter to ask the browser again after a refusal), which microphone, the
+  **voice gate** (sends only while you speak: the level meter shows your voice, the yellow mark
+  where the gate opens; levels 1-10 are -60 to -24 dBFS, it stays open 0.45 s after you stop),
+  the volume of all voices and of each person (remembered by name), and *Keep game sounds out*.
+* **No outside service.** Each pair of computers in the room has its own audio call over WebRTC,
+  through the same STUN/TURN as the game: members call the host, and of two members the one that
+  joined first calls the other. A room holds at most five computers, so each sends its voice to
+  at most four others (about 30-40 kbps each with Opus); nothing mixes them on a server.
+  Echo cancellation, noise suppression and automatic gain come from the browser.
+* **Game sounds and the microphone.** Browsers cancel the echo of what a page plays, but Chrome
+  only does that for `<audio>`/`<video>` elements, not for Web Audio, which plays every game sound
+  (music already plays through an `<audio>` element). With *Keep game sounds out* on (the default),
+  while your microphone is on the game sounds go Web Audio -> a WebRTC connection inside the page
+  -> an `<audio>` element, so the browser cancels them like the voices. That adds a few hundredths
+  of a second to them; if it can't connect, the game sounds play directly as before. Echo
+  cancellation needs a real microphone and speakers, so it can only be tried out by playing:
+  headphones avoid the question altogether.
+* Messages: `vstate {on, mic, muted}` member -> host (the host puts it in the room info, so
+  everyone sees who has voice), `talk {id, on}` when someone's gate opens or closes.
+
+## The same sounds on every computer
+
+* The host picks **Sounds (everyone)** (child friendly, original, extended, uncensored, voices off)
+  and **Sound variety (everyone)** in Match settings. During the match every computer plays that
+  set, without anyone's own ticks; your own Sounds & Voices settings come back after it
+  (`AB.audio.forceProfile`).
+* **Seeded choices.** Each round picks a handful of takes per sound event (`A.newRound`); a
+  network round seeds that from the round's seed, so every computer loads the same takes. Each
+  sound the game asks for then picks its take from a key made of the round seed, the event's tick
+  and its place among that tick's events (`seq`, from js/net.js), not from `Math.random`, and
+  doesn't prefer whatever happens to be loaded already. The countdown, announcer, draw and victory
+  voices are keyed on the round seed.
+* **With rollback.** A sound plays when its tick is first simulated, guesses included. A re-run of
+  the same ticks plays nothing again (see *What you see* above), and the same event a tick or
+  three later is still the same event. So a sound only differs between computers when one of
+  them guessed an event that then didn't happen (it can't be unplayed) or heard of a real one
+  late. In testing (three computers, 240 ms ping, 2% loss) all three played the same set of
+  takes.
 
 ## Services used
 

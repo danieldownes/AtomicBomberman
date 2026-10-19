@@ -204,6 +204,7 @@ js/tilesets.js      the Bedrock arena's terrain: loading, previews and cached re
 js/net.js           rollback session: prediction, re-simulation, time sync, checksums, drop-outs (see NETWORK.md)
 js/netplay.js       network rooms over PeerJS/WebRTC: hosting, joining, pings, relaying
 js/netscreens.js    the network lobby and room screens, and the match controller
+js/voice.js         voice chat in network rooms: microphone, voice gate, one WebRTC call per pair
 js/netconfig.js     optional relay (TURN) and matchmaking server settings (empty by default)
 js/vendor/          PeerJS 1.5.5 (MIT), loaded only for network games
 data/gamedata.js    VALUELST.RES, MESSAGES.TXT, SOUNDLST.RES, all 67 .SCH schemes, EXTRA*.RES, *.BM help

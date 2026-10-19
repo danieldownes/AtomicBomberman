@@ -114,7 +114,8 @@
       }
       this.used[t] = arr;
       g.step(arr);
-      const evs = g.events.map(e => Object.assign({ tick: t }, e));
+      // (seq: its place among this tick's events, the same on every computer: it picks the sound take)
+      const evs = g.events.map((e, k) => Object.assign({ tick: t, seq: k }, e));
       if (out) out.push(...evs); else { this.evLog.set(t, evs); this.events.push(...evs); }
       this.snaps.set(t, g.saveState());
       if (t % 60 === 0) this.sums.set(t, g.checksum());
@@ -311,7 +312,7 @@
       return { tick: this.game.tick, confirmed: this.confirmedTick, behind: this.game.tick - this.confirmedTick, delay: this.delay, maxRoll: this.maxRoll, offset: off, ...this.stats };
     }
   }
-  const evKey = (e) => { const o = Object.assign({}, e); delete o.tick; return JSON.stringify(o); };
+  const evKey = (e) => { const o = Object.assign({}, e); delete o.tick; delete o.seq; return JSON.stringify(o); };
   Net.RollbackSession = RollbackSession;
 
   // ---- self-test: three computers through a host, with latency, jitter and packet loss ----

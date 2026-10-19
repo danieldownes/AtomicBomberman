@@ -40,7 +40,7 @@ window.AB_VERSION = { base: '1.0', build: '__AB_BUILD__', commit: '__AB_COMMIT__
 (function () {
   const DATA = [['data/gamedata.js', 176836], ['data/fonts.js', 23504], ['data/sprites.js', 3991153], ['data/classic.js', 13297], ['data/campaigns.js', 2542], ['data/sounds.js', 102482], ['data/titlefont.js', 22935]];
   const CODE = ['js/core.js', 'js/gfx.js', 'js/tilesets.js', 'js/audio.js', 'js/input.js', 'js/game.js', 'js/ai.js', 'js/render.js',
-                'js/net.js', 'js/screens.js', 'js/screens2.js', 'js/netplay.js', 'js/netscreens.js', 'js/main.js'];
+                'js/net.js', 'js/voice.js', 'js/screens.js', 'js/screens2.js', 'js/netplay.js', 'js/netscreens.js', 'js/main.js'];
   // a deployed build asks for its own copy of every file (?v=<commit>), so a cached older file can't mix in
   const V = window.AB_VERSION || {}, bust = /^[0-9a-f]{7,40}$/.test(V.commit || '') ? '?v=' + V.commit : '';
   const bar = document.querySelector('#bar > div'), msg = document.getElementById('lmsg');
