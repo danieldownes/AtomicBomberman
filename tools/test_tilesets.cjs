@@ -53,7 +53,7 @@ async function environment(saved = {}) {
   };
   vm.createContext(c);
   for (const file of ['data/gamedata.js', 'data/fonts.js', 'data/sprites.js', 'data/classic.js',
-    'js/core.js', 'js/gfx.js', 'js/tilesets.js', 'js/game.js', 'js/ai.js', 'js/render.js']) vm.runInContext(source(file), c, { filename: file });
+    'js/core.js', 'js/gfx.js', 'js/victory.js', 'js/tilesets.js', 'js/game.js', 'js/ai.js', 'js/render.js']) vm.runInContext(source(file), c, { filename: file });
   const A = c.window.AB;
   A.audio = { setVolumes() {}, play() {}, PRESET_LABEL: { extended: 'Extended' }, preset: () => 'extended', isCustom: () => false };
   A.input = { layouts: [], takePresses: () => [] };

@@ -154,6 +154,7 @@ window.AB = window.AB || {};
       musicOrder: 'level',                  // level = each level's own track, shuffle = any ticked track
       winsNeeded: AB.val(310, 2),
       enhancedGfx: true,                    // soft sprite edges / glowing flames (port addition)
+      hdMode: false,                        // optional art pack; downloaded only after enabling
       idleAnims: true,                      // play the unused idle animations when a player stands still
       playIntro: true,                      // the intro movie from the CD (INTRO/BMINTRO.EXE) on start
       smoothScaling: false,                 // bilinear screen scaling instead of sharp pixels

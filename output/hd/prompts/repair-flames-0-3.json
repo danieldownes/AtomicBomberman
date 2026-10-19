@@ -1,0 +1,5 @@
+{
+  "tool": "built-in image_gen",
+  "reference": "output/hd/repair/flames-0-3-reference.png",
+  "prompt": "Use case: style-transfer. Edit the supplied 2 by 2 sheet of four green flame explosion animation frames into smooth high-resolution game sprite art. Keep exactly four crosses, in their same quadrants, with exactly the original center coordinates, arm lengths, narrow arm widths and straight horizontal/vertical alignment. Each cross is ONE connected continuous flame, with seamless uninterrupted flowing texture from its white-hot center to all four tapering tips. Preserve the subtle differences between the four reference flame states. Thin white/lime cores, vivid green turbulent flame edges, transparent outside each flame. Faithful 1990s arcade game energy-flame aesthetic; smoother detailed wisps, not pixelated. Crucial: no distinct blocks, no joints or brightness steps along any arm, no big bulb or starburst in the center, no rings, smoke, sparkles far outside the existing silhouette, scene, text, frame borders, extra arms or diagonal rays. Keep arms narrow exactly like the reference, don't expand coverage. No solid background: actual transparency."
+}

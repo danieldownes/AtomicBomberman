@@ -15,9 +15,7 @@
   window.addEventListener('resize', fit); fit();
   // display options: enhanced sprite edges and sharp/smooth screen scaling
   AB.applyDisplay = function () {
-    const S = AB.settings || {};
-    AB.gfx.setEnhanced(S.enhancedGfx !== false);
-    canvas.style.imageRendering = S.smoothScaling ? 'auto' : 'pixelated';
+    AB.gfx.applyDisplay(canvas);
   };
 
   function loadScript(src) {
@@ -32,11 +30,18 @@
     msg.textContent = 'Preparing graphics...';
     await AB.gfx.load((f) => { bar.style.width = Math.round(70 + f * 22) + '%'; });
     await AB.gfx.loadTitleFont();
+    await AB.gfx.loadMenuFont();
     msg.textContent = 'Loading pictures...';
-    await AB.gfx.preloadImages(['title', 'mainmenu_port', 'glue0', 'iplogo', 'hslogo']);
+    await AB.gfx.preloadImages(['title', 'mainmenu-clean', 'glue0', 'iplogo', 'hslogo']);
     // while the menus are up, fetch the loading pictures and the end-of-round screens in the background
     AB.gfx.prefetch(['glue1', 'glue2', 'glue3', 'glue4', 'glue5', 'glue6', 'results', 'draw', 'winz']);
     bar.style.width = '96%';
+    // A saved HD preference still loads its assets on demand, with visible progress.
+    if (AB.settings.hdMode && AB.hd) {
+      msg.textContent = 'Loading HD graphics...';
+      try { await AB.hd.set(true, p => { bar.style.width = Math.round(p.fraction * 100) + '%'; msg.textContent = 'Loading HD graphics... ' + Math.round(p.fraction * 100) + '%'; }); }
+      catch (e) { AB.settings.hdMode = false; AB.saveSettings(); console.warn(e.message); }
+    }
     // sounds load on demand (audio/clips); the menus need only a few right away
     AB.audio.configure(AB.settings);
     AB.menuSounds = AB.audio.loadMenuSounds();

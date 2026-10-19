@@ -58,6 +58,33 @@
   }
   // a few non-player tints used by the port
   const SPECIAL = { gold: [100, 80, 0], ghost: [60, 60, 70] };
+  const hdTints = new Map(); let hdTintBytes = 0;
+  gfx.releaseHDTints = function () { hdTints.clear(); hdTintBytes = 0; };
+  // HD atlases whose pixels can't be read (opened from disk without js/gfx.js readableSrc's scripts):
+  // those animations are drawn from the original, recoloured sprites instead
+  const hdUnreadable = new Set();
+  // the HD cel recoloured for `color`; null: no recolouring needed; false: can't recolour it here
+  function hdFrame(ani, f, color, hd) {
+    const a = atlases[ani], rgb = typeof color === 'string' ? SPECIAL[color] : AB.PLAYER_RGB[color];
+    if (!a.meta.recolor || color === undefined || color === null || !rgb) return null;
+    if (hdUnreadable.has(hd)) return false;
+    const key = ani + ':' + f + ':' + color;
+    if (hdTints.has(key)) { const v = hdTints.get(key); hdTints.delete(key); hdTints.set(key, v); return v.canvas; }
+    const fr = a.meta.frames[f], s = AB.hd.scale(), c = document.createElement('canvas');
+    c.width = fr[2] * s; c.height = fr[3] * s;
+    c.getContext('2d').drawImage(hd, fr[0] * s, fr[1] * s, c.width, c.height, 0, 0, c.width, c.height);
+    // Cache only the cel being used. Tinting a complete HD death/idle atlas per player is costly.
+    let canvas;
+    try { canvas = remapCanvas(c, rgb); }
+    catch (e) { hdUnreadable.add(hd); console.warn('HD ' + ani + ': can\'t recolour (' + e.name + '), using the original sprites'); return false; }
+    const bytes = c.width * c.height * 4;
+    hdTints.set(key, { canvas, bytes }); hdTintBytes += bytes;
+    while (hdTintBytes > 64 * 1024 * 1024 && hdTints.size > 1) {
+      const [key, v] = hdTints.entries().next().value;
+      hdTints.delete(key); hdTintBytes -= v.bytes;
+    }
+    return canvas;
+  }
 
   // ---- "enhanced graphics": the .ANI images only carry an on/off colour key (no alpha channel; the
   // CIMG pixels are 15-bit RGB with the top bit never set). We derive soft edges at load time:
@@ -71,6 +98,13 @@
     for (const n in atlases) { atlases[n].canvases = {}; atlases[n].base = null; }
   };
   gfx.enhanced = () => enhanced;
+  gfx.applyDisplay = function (canvas) {
+    const settings = AB.settings || {}, scale = AB.hd && AB.hd.scale() || 1;
+    gfx.setEnhanced(settings.enhancedGfx !== false);
+    if (canvas.width !== AB.W * scale || canvas.height !== AB.H * scale) { canvas.width = AB.W * scale; canvas.height = AB.H * scale; }
+    const ctx = canvas.getContext('2d'); ctx.setTransform(scale, 0, 0, scale, 0, 0); ctx.imageSmoothingEnabled = scale > 1;
+    canvas.style.imageRendering = scale > 1 || settings.smoothScaling ? 'auto' : 'pixelated';
+  };
   function enhance(img, meta) {
     const fx = meta.fx || 'none';
     if (fx === 'none') return img;
@@ -135,7 +169,9 @@
     if (!a.canvases[color]) a.canvases[color] = remapCanvas(base, AB.PLAYER_RGB[color]);
     return a.canvases[color];
   }
-  gfx.prewarm = function (anis, color) { for (const n of anis) source(n, color); };
+  // the HD atlas to draw frame f of ani from (null: draw the original sprite)
+  const hdCel = (ani, f) => { const hd = AB.hd && AB.hd.atlas(ani); return hd && !AB.hd.keepsOriginal(ani, f) ? hd : null; };
+  gfx.prewarm = function (anis, color) { for (const n of anis) { const hd = hdCel(n, 0); if ((hd ? hdFrame(n, 0, color, hd) : false) === false) source(n, color); } };
 
   // draw frame #f of ani with its hotspot at (x,y)
   gfx.frame = function (ctx, ani, f, x, y, color, flip) {
@@ -143,8 +179,28 @@
     if (!a) return;
     const fr = a.meta.frames[f];
     if (!fr) return;
-    const src = source(ani, color);
-    ctx.drawImage(src, fr[0], fr[1], fr[2], fr[3], Math.round(x - fr[4]), Math.round(y - fr[5]), fr[2], fr[3]);
+    let hd = hdCel(ani, f);
+    const tinted = hd && hdFrame(ani, f, color, hd);
+    if (tinted) { ctx.drawImage(tinted, Math.round(x - fr[4]), Math.round(y - fr[5]), fr[2], fr[3]); return; }
+    if (tinted === false) hd = null;
+    const src = hd || source(ani, color), s = hd ? AB.hd.scale() : 1;
+    ctx.drawImage(src, fr[0] * s, fr[1] * s, fr[2] * s, fr[3] * s, Math.round(x - fr[4]), Math.round(y - fr[5]), fr[2], fr[3]);
+  };
+  // frame #f of ani, `scale` times its size, centred on (cx, cy), smoothly scaled (the main menu's bomb)
+  gfx.frameScaled = function (ctx, ani, f, cx, cy, scale = 1, color) {
+    const a = atlases[ani], fr = a && a.meta.frames[f];
+    if (!fr) return;
+    let hd = hdCel(ani, f);
+    const tinted = hd && hdFrame(ani, f, color, hd), w = fr[2] * scale, h = fr[3] * scale;
+    if (tinted === false) hd = null;
+    ctx.save();
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    if (tinted) ctx.drawImage(tinted, cx - w / 2, cy - h / 2, w, h);
+    else {
+      const src = hd || source(ani, color), s = hd ? AB.hd.scale() : 1;
+      ctx.drawImage(src, fr[0] * s, fr[1] * s, fr[2] * s, fr[3] * s, cx - w / 2, cy - h / 2, w, h);
+    }
+    ctx.restore();
   };
   gfx.frameSize = function (ani, f) {
     const fr = atlases[ani] && atlases[ani].meta.frames[f];
@@ -193,13 +249,50 @@
     im.src = 'img/' + name + '.png' + (attempt ? '?retry=' + attempt : '');
     return im;
   };
-  gfx.image = function (name, priority) {
+  gfx.retroImage = function (name, priority) {
     if (!images[name]) images[name] = newImage(name, priority, 0);
     return images[name];
   };
+  gfx.image = function (name, priority) {
+    if (AB.hd && AB.hd.active()) {
+      const im = AB.hd.image(name);
+      if (im) return im;
+      AB.hd.requestImage(name);
+    }
+    return gfx.retroImage(name, priority);
+  };
   gfx.isLoaded = (name) => { const im = images[name]; return !!(im && im.complete && im.naturalWidth); };
+
+  // ---- pictures whose pixels the game reads (recolouring) ----
+  // Opened from disk (file://), Chrome treats every picture file as coming from another site: it can be
+  // drawn, but its pixels can't be read back. So those pictures also come as scripts holding the picture
+  // as a data: URL (tools/build_pixel_scripts.cjs): <picture without extension>.js calls
+  // AB_PIXELS(<picture path>, <data: URL>). readableSrc(path) resolves to a URL whose pixels can be read:
+  // over http the path itself, from disk that data: URL (or the path, if the script is missing).
+  const fromDisk = typeof location !== 'undefined' && location.protocol === 'file:', readable = new Map();
+  window.AB_PIXELS = function (src, url) { const r = readable.get(src); if (r) r(url); };
+  gfx.readableSrc = function (path) {
+    const [src, query = ''] = path.split('?');
+    if (!fromDisk) return Promise.resolve(path);
+    return new Promise((resolve) => {
+      const done = (url) => { if (readable.get(src) === done) readable.delete(src); script.remove(); resolve(url); };
+      readable.set(src, done);
+      const script = document.createElement('script');
+      script.src = src.replace(/\.[a-z]+$/i, '.js') + (query && '?' + query);
+      script.onload = () => { if (readable.get(src) === done) { console.warn('no pixel data in', script.src); done(path); } };
+      script.onerror = () => { console.warn('pixel script missing:', script.src); done(path); };
+      document.head.appendChild(script);
+    });
+  };
+  // a picture whose pixels can be read, loaded (rejects if it fails)
+  gfx.readableImage = (path) => gfx.readableSrc(path).then(url => new Promise((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = () => reject(new Error('picture failed to load: ' + path));
+    im.src = url;
+  }));
   // resolves true once the picture is in, false if it still failed after `retries` more tries
-  gfx.loadImage = function (name, opts) {
+  gfx.loadRetroImage = function (name, opts) {
     const priority = (opts && opts.priority) || 'auto', retries = opts && opts.retries !== undefined ? opts.retries : 2;
     return new Promise((res) => {
       let tries = 0;
@@ -213,8 +306,12 @@
         tries++;
         setTimeout(() => { images[name] = newImage(name, priority, tries); watch(images[name]); }, 700 * tries);
       };
-      watch(gfx.image(name, priority));
+      watch(gfx.retroImage(name, priority));
     });
+  };
+  gfx.loadImage = function (name, opts) {
+    const retro = gfx.loadRetroImage(name, opts);
+    return AB.hd && AB.hd.active() ? Promise.all([retro, AB.hd.loadImage(name)]).then(([ok, hd]) => ok || hd) : retro;
   };
   gfx.preloadImages = (names, opts) => Promise.all(names.map(n => gfx.loadImage(n, opts)));
   const later = [];
@@ -233,7 +330,38 @@
   };
   gfx.blit = function (ctx, name, x = 0, y = 0) {
     const im = gfx.image(name);
-    if (im.complete && im.naturalWidth) ctx.drawImage(im, x, y);
+    if (im.complete && im.naturalWidth) ctx.drawImage(im, x, y, im.width, im.height);
+  };
+
+  // Amarante's narrow, angular serifs echo the original gold menu lettering. A real outline font
+  // keeps counters, baselines and spacing intact at both resolutions; labels remain ordinary text.
+  function fontBytes(encoded) {
+    const bin = atob(encoded), buf = new Uint8Array(bin.length);
+    for (let i=0;i<bin.length;i++) buf[i]=bin.charCodeAt(i);
+    return buf.buffer;
+  }
+  gfx.loadMenuFont = async function () {
+    if (!window.FontFace) return;
+    try { const face = new FontFace('ABMenuClean', window.AB_MENUFONT ? fontBytes(window.AB_MENUFONT) : 'url(data/menu-amarante.ttf)'); await face.load(); document.fonts.add(face); }
+    catch (e) { console.warn('Menu font:', e.message); }
+  };
+  let hdFontsReady = false;
+  gfx.loadHDFonts = async function () {
+    if (hdFontsReady || !window.FontFace) return;
+    const faces = await Promise.all(['font0','font1','font6'].map(async name => {
+      const encoded = window.AB_HD_MANIFEST && window.AB_HD_MANIFEST.fonts && window.AB_HD_MANIFEST.fonts[name];
+      const face = new FontFace('ABHD' + name, encoded ? fontBytes(encoded) : 'url(hd/fonts/' + name + '.ttf)'); await face.load(); return face;
+    }));
+    faces.forEach(face => document.fonts.add(face)); hdFontsReady = true;
+  };
+  gfx.menuText = function (ctx, text, x, y, maxW = 268, selected = false) {
+    ctx.save(); ctx.font = '32px ABMenuClean, serif'; ctx.textBaseline = 'alphabetic';
+    const width = ctx.measureText(text).width, scale = Math.min(1, maxW / Math.max(1, width));
+    ctx.translate(x, y + 27); ctx.scale(scale, 1);
+    ctx.lineJoin = 'round'; ctx.lineWidth = 1.4; ctx.strokeStyle = '#151008'; ctx.strokeText(text, 0, 0);
+    const gold = ctx.createLinearGradient(0, -26, 0, 1);
+    gold.addColorStop(0, selected ? '#fffcc0' : '#fff779'); gold.addColorStop(0.5, '#ffeb14'); gold.addColorStop(1, '#c38c08');
+    ctx.fillStyle = gold; ctx.fillText(text, 0, 0); ctx.restore();
   };
 
   // ---- title text in the style of the original's HURRY!! picture ----
@@ -339,6 +467,10 @@
     drawText(ctx, text, x, y, color, font);
   };
   function drawText(ctx, text, x, y, color, font) {
+    if (hdFontsReady && AB.hd && AB.hd.active()) {
+      ctx.save(); ctx.font = F[font].h + 'px ABHD' + font; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+      ctx.fontKerning = 'none'; ctx.fillStyle = color; ctx.fillText(text,x,y); ctx.restore(); return;
+    }
     const sh = fontSheet(font, color); const sp = SPACING[font] || 0;
     for (const ch of text) {
       const c = ch.charCodeAt(0);

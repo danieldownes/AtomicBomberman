@@ -1,0 +1,6 @@
+{
+  "id": "aliens-wall",
+  "tool": "built-in imagegen",
+  "prompt": "Use case: precise-object-edit. Asset type: one HD solid wall tile for the Aliens arena in an Atomic Bomberman game. Edit target: the attached original low resolution tile, enlarged with padding. Faithfully remaster the same single square cold silver/chrome block, beveled metal edges, slightly oblique front view, bright cyan-white highlight along the top and right of the front face, lavender-gray side on left and dark recessed bottom edge. The indistinct green diagonal area on the front must be a smooth, abstract pale green reflection on the reflective face; it must NOT be a leaf, plant, emblem, sticker or separate object. No stem, veins, botanical shapes or engraved symbol. Preserve tile proportions, framing, original oblique perspective, bright top edge and dark bottom. Smooth detailed game sprite, crisp antialiased silhouette, transparent background. Keep object centered in the same footprint, with wide transparent margins. Only one tile; no sheet, no text, no extra decorations.",
+  "source": "C:/Users/DanielDownes(Wovenby/.codex/generated_images/01a14e29-efca-7d33-9510-003aa63111f5/exec-c51e1b05-807b-4555-89c6-c86aefe84139.png"
+}

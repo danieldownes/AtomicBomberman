@@ -1,0 +1,5 @@
+{
+  "tool": "built-in image_gen",
+  "reference": "output/hd/repair/flames-4-reference.png",
+  "prompt": "Use case: style-transfer. Make ONE transparent high-resolution green explosion cross for an Atomic Bomberman animation. Image 1 is the exact pose/geometry reference: preserve its center, proportions, arm lengths and narrow width; smooth the pixelated flame while retaining its four-way horizontal/vertical shape. Image 2 is the approved material/style reference: use the same vivid green flowing flame with a thin white-lime hot core. Produce only the SINGLE cross from image 1, not a four-cell grid. A single continuous flame, no separate blocks or seams anywhere along arms, no center bulb, no extra rays or objects, no text, no background. Keep the same transparent padding and exact coverage as image 1. Crisp smooth sprite edges, subtle organic turbulent wisps."
+}

@@ -1,0 +1,6 @@
+{
+  "id": "zen-10-112-118-119",
+  "tool": "built-in imagegen",
+  "prompt": "Use case: precise-object-edit. HD game animation repair. Edit the attached 2 by 2 reference containing exactly FOUR animation cels of the same green Atomic Bomberman. Redraw each reference pose faithfully at high resolution, with smooth gloss on the green helmet, silver flexible mechanical suit joints, green gloves and boots, white face visor with black eyes, and exactly one green-tipped antenna. Preserve every pose, eye expression, limb position, perspective, proportions and placement. TOP LEFT: downward-looking body, both arms straight down, feet close together. TOP RIGHT: eyes closed as one black horizontal curve, body descending from meditation with legs close/crossing exactly as reference. BOTTOM LEFT and BOTTOM RIGHT: front-facing standing with arms down and boots separated, two black upright eyes, tiny body differences preserved. Match each cell independently; do not substitute the same pose for the four references. Preserve the large transparent margins and exact 2x2 layout. No text, no scenery, no extra props, no duplicate body parts, no shadows outside silhouettes. Clean transparent background.",
+  "source": "C:/Users/DanielDownes(Wovenby/.codex/generated_images/01a14e29-efca-7d33-9510-003aa63111f5/exec-dff7d868-907d-4348-81f3-6a7f166fe74b.png"
+}

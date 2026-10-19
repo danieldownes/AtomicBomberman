@@ -4,6 +4,7 @@ Outputs:
   web/data/sprites.js  - window.AB_SPRITES = { aniName: {src, recolor, frames, seqs} }
   web/data/fonts.js    - window.AB_FONTS   = { fontN: {h, g:{charCode:[w,[rowbits...]]}} }
   web/img/*.png        - backgrounds / misc pictures from DATA/RES/*.PCX
+  output/victory/source/*.png - original victory variants for build_victory.cjs (not deployed)
 """
 import sys, os, json, base64, io, glob, struct
 sys.path.insert(0, os.path.dirname(__file__))
@@ -67,9 +68,14 @@ with open(os.path.join(WEB, 'data/fonts.js'), 'w') as f:
 
 os.makedirs(os.path.join(WEB, 'img'), exist_ok=True)
 n = 0
+victory_names = {f'victory{i}' for i in range(10)} | {'team0', 'team1'}
 for p in glob.glob(os.path.join(RAW, 'DATA/RES/*.PCX')):
     im = Image.open(p).convert('RGB')
-    im.save(os.path.join(WEB, 'img', os.path.basename(p)[:-4].lower() + '.png'), optimize=True); n += 1
+    name = os.path.basename(p)[:-4].lower()
+    # The browser uses one scene and masks. Keep the CD variants as build-time references only.
+    dest = os.path.join(os.path.dirname(os.path.abspath(WEB)), 'output', 'victory', 'source') if name in victory_names else os.path.join(WEB, 'img')
+    os.makedirs(dest, exist_ok=True)
+    im.save(os.path.join(dest, name + '.png'), optimize=True); n += 1
 print('pcx', n)
 
 # the Aliens arena's floor (FIELD6.PCX) is much brighter than the sprites on it: darken its 15 x 11

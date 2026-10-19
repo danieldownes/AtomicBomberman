@@ -18,9 +18,39 @@
   const bombSeq = (b) => classic ? (b.kind === 1 ? 'nes bomb trigger' : b.kind === 2 ? 'nes bomb jelly' : 'nes bomb')
     : b.kind === 1 ? 'bomb trigger green' : b.kind === 2 ? 'bomb jelly green' : 'bomb regular green';
 
+  // HD bombs. The CD's bomb animations are one bomb drawn again and again: smaller and back (the
+  // regular and remote bombs pulse), leaning from side to side (jelly), with "DUD!" blinking on it
+  // (a dud). The HD remaster redrew every frame on its own and the small ones came out wrong (two
+  // fuse caps, clipped edges), so in HD only the biggest frame is drawn, moved into the place of each
+  // original frame: BOMB_XF[atlas][frame] = [sx, sy, lean, tx, ty] maps the biggest frame's pixels
+  // (x, y from its hotspot) to (sx*x + lean*y + tx, sy*y + ty), fitted to the CD's frames by
+  // tools/build_bomb_transforms.py. Between two states it blends, so the bomb moves smoothly.
+  const BOMB_XF = {"bombs":[[1.0,1.0,0.0,-0.0,0.0],[0.9563,0.9563,0.0,-0.0029,0.0598],[0.9142,0.9142,0.0,-0.0057,0.1174],[0.8675,0.8675,0.0,-0.0088,0.1812],[0.8262,0.8262,0.0,-0.0115,0.2376],[0.773,0.773,0.0,-0.0151,0.3104],[0.7256,0.7256,0.0,-0.0182,0.3753],[0.6794,0.6794,0.0,-0.0213,0.4384],[0.6352,0.6352,0.0,-0.0242,0.4987],[0.5918,0.5918,0.0,-0.0271,0.5581],[0.893,0.8523,0.1504,-0.317,-0.5731],[0.8858,0.8608,0.104,-0.2979,-0.399],[0.8759,0.8664,0.0495,-0.2969,-0.1857],[0.8666,0.8685,-0.0015,0.0547,-0.1572],[0.8736,0.8666,-0.0538,0.3857,-0.1889],[0.8727,0.8671,-0.104,0.505,-0.1384],[0.8745,0.8644,-0.1565,0.626,-0.3026]],"triganim":[[1.0,1.0,0.0,-0.0,-0.0],[0.9579,0.9579,0.0,-0.0025,-0.7895],[0.9127,0.9127,0.0,-0.0052,-1.6371],[0.8709,0.8709,0.0,-0.0077,-2.4219],[0.8276,0.8276,0.0,-0.0103,-3.2339],[0.777,0.777,0.0,-0.0133,-4.1818],[0.7257,0.7257,0.0,-0.0163,-5.1439],[0.6819,0.6819,0.0,-0.0189,-5.9662],[0.6345,0.6345,0.0,-0.0217,-6.8532],[0.5983,0.5983,0.0,-0.0239,-7.533]],"duds":[[1.0,1.0,0.0,0.0,0.0],[1.0,1.0,0.0,0.0,0.0]]};
+  const BOMB_BASE = { bombs: ['bombs', 0], triganim: ['triganim', 0], duds: ['bombs', 0] };
+  function drawBomb(ctx, seq, anim, x, y, color) {
+    const s = G.seq(seq), xf = s && BOMB_XF[s.ani], base = s && BOMB_BASE[s.ani];
+    if (!xf || !AB.hd || !AB.hd.atlas(base[0])) { G.draw(ctx, seq, Math.floor(anim / 3), x, y, color, false); return; }
+    const n = s.states.length, pos = anim / 3, i = Math.floor(pos) % n, f = pos - Math.floor(pos);
+    const a = xf[s.states[i][0]], b = xf[s.states[(i + 1) % n][0]], m = a.map((v, k) => v + (b[k] - v) * f);
+    ctx.save();
+    ctx.translate(x, y); ctx.transform(m[0], 0, m[2], m[1], m[3], m[4]);
+    ctx.imageSmoothingEnabled = true;
+    G.frame(ctx, base[0], base[1], 0, 0, color);
+    // the dud's "DUD!" frame: the lettering of the CD's frame (font1's letters, 7 px tall, outlined)
+    if (s.ani === 'duds' && s.states[i][0] === 0) {
+      ctx.translate(0, -20); ctx.scale(0.75, 7 / 12); ctx.translate(0, -1);
+      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) G.text(ctx, 'DUD!', dx, dy, '#000000', 'font1', 1, false);
+      G.text(ctx, 'DUD!', 0, 0, '#ffffff', 'font1', 1, false);
+    }
+    ctx.restore();
+  }
+
   Rn.draw = function (ctx, g, t) {
     const lvl = g.level;
     classic = lvl === AB.CLASSIC_LEVEL;
+    // Classic is 8-bit art, HD or not (it has no HD pictures): its pixels stay sharp
+    const smooth = ctx.imageSmoothingEnabled;
+    if (classic) ctx.imageSmoothingEnabled = false;
     AB.tilesets.drawField(ctx, lvl);
     // floor extras
     for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
@@ -68,11 +98,10 @@
       if (b.motion === 3) continue;       // drawn with the holder
       let seq = bombSeq(b);
       if (b.dud && b.t > AB.K.FUSE && !classic) seq = 'bomb regular green dud';
-      const st = Math.floor(b.anim / 3);
       const h = b.motion === 2 && b.fly ? b.fly.h : 0;
       sprites.push({ y: b.y + (h ? 40 : -1), fn: () => {
         if (h) G.draw(ctx, 'shadow', 0, b.x, b.y + 16, -1, false);
-        G.draw(ctx, seq, st, b.x, b.y + 17 - h, b.color, false);
+        drawBomb(ctx, seq, b.anim, b.x, b.y + 17 - h, b.color);
       } });
     }
     // campaign ghosts and rovers (ALIENS1.ANI)
@@ -95,6 +124,7 @@
     }
     sprites.sort((a, b) => a.y - b.y);
     for (const s of sprites) s.fn();
+    ctx.imageSmoothingEnabled = smooth;
     drawHud(ctx, g, t);
     if (g.hurryShown > 0 && Math.floor(g.hurryShown / 8) % 2 === 0) G.draw(ctx, 'hurry', 0, 320, 260, -1, false);
   };
@@ -174,7 +204,7 @@
   }
 
   function drawHeldBomb(ctx, b, x, yBottom) {
-    G.draw(ctx, bombSeq(b), Math.floor(b.anim / 3), x, yBottom, b.color, false);
+    drawBomb(ctx, bombSeq(b), b.anim, x, yBottom, b.color);
   }
 
   // ---- top status bar: per-player score/kills (VALUELST 113-119), timer at #110/#111 ----

@@ -14,6 +14,32 @@ The intro movie from the CD plays first; press any key to skip it. If the browse
 (browsers need one key press or click before they allow sound), the first key turns the sound on.
 You can turn the intro off under Options > Intro Movie on Start.
 
+### Graphics modes
+
+The main menu uses editable gold lettering, with **Local Play**, **Network Game**, then
+**Campaign Game**. **HD Mode: Off**, directly below Campaign Game, toggles the graphics pack
+with Enter or Left/Right. Retro is the default and downloads no HD assets.
+
+Enabling HD shows a loading bar while the menu art, characters and effects arrive. Escape
+cancels; a failed download leaves Retro active and can be retried. The choice is remembered.
+HD draws at 1920 x 1440 while preserving the original 640 x 480 game coordinates, animation
+timing, player colours and simulation. Arena backgrounds, tiles and destruction frames load
+when their arena is needed, separately from the initial switch. Decoded artwork is reused
+when switching modes again during the same session. HD works opened from disk too: the
+pictures the game recolours (the bombermen, the victory scene) also come as scripts, because
+Chrome won't let a page opened from disk read the pixels of its picture files.
+
+The optional pack remasters the still screens and most animation artwork, including Bedrock.
+Classic stays 8-bit, drawn with sharp pixels. The apple-eating and knuckle-blowing idles, corner
+reactions, conveyors, Aliens enemies, timer and teleport effects use reviewed HD repairs.
+The Aliens wall has a smooth reflective face without the invented leaf. Meditation, head polishing
+and several deaths still use the original sprites because their generated poses failed review.
+HD flames are cut from connected blast artwork to keep their segment joins continuous.
+HD draws its
+bombs from the biggest bomb frame, scaled and leaned like the original animation. The intro movie and real people in the credits retain their original assets.
+Main-menu lettering uses the bundled Amarante outline font; Retro retains the original
+bitmap fonts elsewhere.
+
 ### Default controls (from the original INPUT.BM; change them under Options > Define keyboard layouts)
 
 | Player | Move | Drop bomb | Action (punch / stop kick / trigger) |
@@ -42,8 +68,8 @@ Other keys:
 ## Campaign Mode
 
 The original has a hidden single-player campaign: pressing C five times on its Player Setup screen
-opens it, and that still works here. The port also lists it on the main menu, in place of
-"Start Network Game"; network play is under "Network Game" (below).
+opens it, and that still works here. The port also lists it as **Campaign Game** on the main menu;
+network play is under **Network Game** (below).
 
 * There are three campaigns from the CD: *Simple* (4 stages), *Croutons* (9) and *Ghost Towns* (4).
 * Each stage sets the arena, the scheme, how many ghosts and rovers there are and how fast they
@@ -52,7 +78,7 @@ opens it, and that still works here. The port also lists it on the main menu, in
   you on contact; flames kill them. They don't harm computer players.
 * Clear every enemy to move on to the next stage. If you lose, you get "Oh Well! Campaign
   unsuccessful!" and replay that stage.
-* The humans are the keyboard and joystick players from Start Game > Player Setup (KEY 0 if there
+* The humans are the keyboard and joystick players from Local Play > Player Setup (KEY 0 if there
   are none).
 * Stages you have cleared are remembered. Left/Right on the campaign screen picks a starting stage.
 
@@ -90,7 +116,7 @@ NETWORK.md.
 
 ## Computer players
 
-Start Game > Player Setup: Right cycles a player through *AI easy*, *AI medium* and *AI original*,
+Local Play > Player Setup: Right cycles a player through *AI easy*, *AI medium* and *AI original*,
 then the keyboards and joysticks.
 
 Typing on Player Setup gives the highlighted player its own name in place of "Player 3" (up to 12
@@ -115,7 +141,7 @@ on top of each other: 8 computer players overlapped 3.6 % of the time (once for 
 
 ## Arenas
 
-Start Game > Arena & Match > **Arenas** has a tick box for every arena; each round is played in one
+Local Play > Arena & Match > **Arenas** has a tick box for every arena; each round is played in one
 of the ticked ones.
 
 * *The Hockey Rink* and *Aliens* start unticked, because the original leaves them out of its
@@ -130,7 +156,7 @@ of the ticked ones.
 
 ## Schemes
 
-Start Game > Arena & Match > **Schemes** (the network host's Match settings and the Options
+Local Play > Arena & Match > **Schemes** (the network host's Match settings and the Options
 screen's *Scheme File* open the same list). Every .SCH layout has a tick box, and each round is
 played on one of the ticked ones.
 
@@ -147,6 +173,14 @@ played on one of the ticked ones.
   * *Team layouts*.
   * *Small games (made for 4 or fewer)*.
   * *Everything*.
+
+## Match victory screens
+
+The celebrating Bomberman uses the winner's colour; the defeated one uses the runner-up's colour.
+Runner-up is decided by total wins (or total kills in a kill-based match), then the other score,
+then the lower player slot if both scores are tied. Team games use the winning and opposing
+teams' white/red colours. The original scene and lighting are preserved while each suit is
+recoloured independently.
 
 ## Options added by the port
 
@@ -219,6 +253,7 @@ js/render.js        drawing with the original sprites
 js/screens.js       menus, results, victory, roulette, online manual, credits, intro movie
 js/screens2.js      Sounds & Voices browser, Arenas, Campaign Mode
 js/gfx.js, audio.js, input.js
+js/victory.js       one victory scene with independent winner/runner-up colours and cached palettes
 js/tilesets.js      the Bedrock arena's terrain: loading, previews and cached rendering
 js/net.js           rollback session: prediction, re-simulation, time sync, checksums, drop-outs (see NETWORK.md)
 js/netplay.js       network rooms over PeerJS/WebRTC: hosting, joining, pings, relaying
@@ -235,6 +270,7 @@ data/fonts.js       FONT0/1/6.FON
 data/titlefont.js   the Anton font (OFL, licence in data/titlefont.LICENSE.txt) for arena names and the countdown
 img/                every .PCX picture as PNG, mainmenu_port.png (relabelled menu), field11.png (Classic)
 img/tilesets/       terrain textures for the Bedrock arena (new generated pixel art)
+img/victory-base.png, victory-mask.png   the shared original win scene and its material/palette map
 img/icons/green-*, favicon-green.ico, manifest.webmanifest   the site icon: a generated green
                     bomberman's head based on the original title and victory artwork (16-48 px
                     for tabs, 180 px for iPhones/iPads, 192/512 px for "add to home screen")

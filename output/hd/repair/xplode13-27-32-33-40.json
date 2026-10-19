@@ -1,0 +1,40 @@
+{
+  "id": "xplode13-27-32-33-40",
+  "unit": 113,
+  "cols": 2,
+  "rows": 2,
+  "entries": [
+    {
+      "name": "xplode13",
+      "frame": 27,
+      "x": 34,
+      "y": 20,
+      "width": 44,
+      "height": 73
+    },
+    {
+      "name": "xplode13",
+      "frame": 32,
+      "x": 32,
+      "y": 20,
+      "width": 48,
+      "height": 73
+    },
+    {
+      "name": "xplode13",
+      "frame": 33,
+      "x": 26,
+      "y": 22,
+      "width": 60,
+      "height": 69
+    },
+    {
+      "name": "xplode13",
+      "frame": 40,
+      "x": 33,
+      "y": 41,
+      "width": 47,
+      "height": 30
+    }
+  ]
+}

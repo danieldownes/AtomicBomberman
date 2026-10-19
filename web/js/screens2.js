@@ -248,7 +248,7 @@
       });
       const hum = humanSetup().map(h => (h.control.startsWith('key') ? 'KEY ' : 'JOY ') + h.control.slice(3)).join(', ');
       G.text(ctx, 'Players: ' + hum, 40, 220, CYAN, 'font0');
-      G.text(ctx, '(set them up in Start Game)', 40, 236, GREY, 'font0');
+      G.text(ctx, '(set them up in Local Play)', 40, 236, GREY, 'font0');
       if (progressOf(c) > 0) G.text(ctx, 'Left/Right: starting stage', 40, 262, GREY, 'font0');
       G.text(ctx, 'Up/Down: campaign   Enter: start   Esc: back', 320, 420, GREY, 'font0', 1);
     },
@@ -305,12 +305,16 @@
   });
 
   SC.register('campdone', {
-    enter() { this.t = 0; A.music('win', false); A.playRange(2000, 2299); },
+    enter() {
+      this.t = 0; A.music('win', false); A.playRange(2000, 2299);
+      const M = AB.match, human = M && M.players.find(p => !p.ai);
+      this.colors = AB.victory.contestants(M, human ? { p: human } : null);
+      AB.victory.load(true);
+    },
     key(k) { if (this.t > 40) { AB.match = null; SC.go('campaign'); } },
     tick() { this.t++; },
     render(ctx) {
-      const M = AB.match, h = M && M.players.find(p => !p.ai);
-      G.blit(ctx, 'victory' + (h ? h.color : 0), 0, 0);
+      AB.victory.draw(ctx, this.colors.winnerColor, this.colors.loserColor);
       U.panel(ctx, 100, 380, 440, 70, 0.7);
       U.centerText(ctx, AB.msg(1220, 'Congratulations!'), 392, YELLOW);
       U.centerText(ctx, AB.msg(1225, 'You made it through the whole campaign!'), 420, WHITE);

@@ -208,13 +208,25 @@
   });
 
   // ================================================================= MAIN MENU
-  // the port's menu picture (img/mainmenu_port.png) replaces "Start/Join Network Game" with these two
-  const MAIN_ITEMS = ['Start Game', 'Campaign Mode', 'Network Game', 'Options', 'About Bomberman', 'Online Manual', 'Exit Bomberman'];
+  const MAIN_ITEMS = [
+    { label: 'Local Play', screen: 'players' }, { label: 'Network Game', screen: 'network', arg: {} },
+    { label: 'Campaign Game', screen: 'campaign' }, { label: () => 'HD Mode: ' + (AB.hd && AB.hd.active() ? 'On' : 'Off'), toggle: true },
+    { label: 'Options', screen: 'settings' }, { label: 'About Bomberman', screen: 'credits' },
+    { label: 'Online Manual', screen: 'help', arg: { back: 'mainmenu' } }, { label: 'Exit Bomberman', exit: true },
+  ];
   SC.register('mainmenu', {
     help: 'manual',
-    enter() { this.sel = this.sel || 0; this.idle = 0; this.confirm = false; A.music('menu'); },
+    enter() { this.sel = this.sel || 0; this.idle = 0; this.confirm = false; this.error = ''; A.music('menu'); },
+    toggleHD() {
+      if (!AB.hd || this.loadingHD) return;
+      const on = !AB.hd.active(); this.loadingHD = true; this.hdProgress = 0; this.error = '';
+      AB.hd.set(on, p => { this.hdProgress = p.fraction; }).then(() => {
+        AB.settings.hdMode = on; AB.saveSettings();
+      }).catch(e => { this.error = e.message === 'HD loading cancelled' ? '' : e.message + '. Press Enter to retry.'; }).finally(() => { this.loadingHD = false; this.idle = 0; });
+    },
     key(k) {
       this.idle = 0;
+      if (this.loadingHD) { if (isBack(k)) AB.hd.cancel(); return; }
       if (this.confirm) {
         if (k.code === 'KeyY' || isOK(k)) { A.playRange(2600, 2699); SC.go('bye'); }
         else this.confirm = false;
@@ -222,33 +234,50 @@
       }
       if (k.code === 'ArrowUp') { this.sel = (this.sel + MAIN_ITEMS.length - 1) % MAIN_ITEMS.length; A.play(20); }
       else if (k.code === 'ArrowDown') { this.sel = (this.sel + 1) % MAIN_ITEMS.length; A.play(21); }
+      else if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight') && MAIN_ITEMS[this.sel].toggle) { A.play(10); this.toggleHD(); }
       else if (isBack(k)) { this.confirm = true; }
       else if (isOK(k)) {
         A.play(10);
-        switch (this.sel) {
-          case 0: SC.go('players'); break;
-          case 1: SC.go('campaign'); break;
-          case 2: SC.go('network', {}); break;
-          case 3: SC.go('settings'); break;
-          case 4: SC.go('credits'); break;
-          case 5: SC.go('help', { back: 'mainmenu' }); break;
-          case 6: this.confirm = true; break;
-        }
+        const item = MAIN_ITEMS[this.sel];
+        if (item.toggle) this.toggleHD();
+        else if (item.exit) this.confirm = true;
+        else SC.go(item.screen, item.arg);
       }
     },
     tick() {
       // attract mode after #92 seconds of idling
-      if (++this.idle > AB.val(92, 30) * AB.TPS && AB.val(92, 30) >= 5) SC.go('game', { demo: true });
+      if (!this.loadingHD && ++this.idle > AB.val(92, 30) * AB.TPS && AB.val(92, 30) >= 5) SC.go('game', { demo: true });
     },
     render(ctx) {
-      G.blit(ctx, 'mainmenu_port', 0, 0);
-      // fcn.0042b9ce: "bomb trigger green" animates next to the selected item (#700: x, y, spacing)
-      const m = AB.val(700, [332, 140, 38, 0]);
-      G.draw(ctx, 'bomb trigger green', Math.floor(frame / AB.TPR), m[0], m[1] + this.sel * m[2], -1, false);
+      G.blit(ctx, 'mainmenu-clean', 0, 0);
+      for (let i = 0; i < MAIN_ITEMS.length; i++) {
+        const label = MAIN_ITEMS[i].label;
+        G.menuText(ctx, typeof label === 'function' ? label() : label, 355, 104 + i * 33, 270, i === this.sel);
+      }
+      // fcn.0042b9ce: "bomb trigger green" pulses next to the selected item. Its 19 states are one bomb
+      // drawn smaller and smaller and back (36 px down to 22 px, 3 ticks each); here its first, full-size
+      // picture is scaled the same way, smoothly, about its middle. It starts big on a new selection.
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (this.bombSel !== this.sel) { this.bombSel = this.sel; this.bombT0 = now; }
+      const bs = G.seq('bomb trigger green');
+      if (bs) {
+        const ph = ((now - this.bombT0) / 950) % 1, scale = 1 - 0.38 * (1 - Math.cos(ph * 2 * Math.PI)) / 2;
+        G.frameScaled(ctx, bs.ani, bs.states[0][0], 332, 118 + this.sel * 33, scale);
+      }
       // the version, and on the same line its commit and date
       const ver = AB.VERSION.text.toUpperCase().replace(' DEV', '');
       G.text(ctx, ver, 50, 0, WHITE, 'font1');
       G.text(ctx, AB.VERSION.commit ? AB.VERSION.commit + '  ' + AB.VERSION.date : 'dev build', 50 + G.textWidth(ver, 'font1') + 10, 2, GREY, 'font0');
+      if (this.sel === 3 && !this.loadingHD) G.text(ctx, 'Enter / Left / Right to toggle', 355, 381, GREY, 'font0');
+      if (this.error) { panel(ctx, 36, 400, 568, 54, 0.9); centerText(ctx, fitTo(this.error, 540, 'font0'), 419, ORANGE, 'font0'); }
+      if (this.loadingHD) {
+        panel(ctx, 135, 190, 370, 105, 0.94);
+        const pct = Math.floor(this.hdProgress * 100);
+        centerText(ctx, 'Loading HD graphics... ' + pct + '%', 211, YELLOW);
+        ctx.fillStyle = '#1b2134'; ctx.fillRect(160, 244, 320, 10);
+        ctx.fillStyle = YELLOW; ctx.fillRect(160, 244, 320 * this.hdProgress, 10);
+        centerText(ctx, 'Arena packs load later. Esc cancels.', 270, GREY, 'font0');
+      }
       if (this.confirm) {
         panel(ctx, 170, 200, 300, 80, 0.85);
         centerText(ctx, AB.msg(10, 'Are you sure you want to exit?'), 220, YELLOW);
@@ -461,7 +490,8 @@
       // needed before the round can start: the arena picture (high priority) and the sound effects;
       // the voices get a few more seconds, then go on loading during the round
       this.img = a.level === undefined; this.fx = false; this.all = false;
-      const field = a.level !== undefined ? AB.tilesets.prepare(a.level) : Promise.resolve(true);
+      this.hdProgress = AB.hd && AB.hd.active() ? 0 : 1;
+      const field = a.level !== undefined ? AB.tilesets.prepare(a.level, p => { this.hdProgress = p.fraction; }) : Promise.resolve(true);
       field.then(() => { this.img = true; });
       const snd = A.newRound((f) => { this.prog = f; }, a.soundSeed);      // (network rounds: the same picks everywhere)
       snd.effects.then(() => { this.fx = true; });
@@ -469,8 +499,7 @@
       // then, quietly: the pictures the next screens show
       Promise.all([field, snd.effects]).then(() => {
         const M = AB.match, S = (M && M.S) || AB.settings, list = ['results', 'draw', 'winz'];
-        if (M && M.players) for (const p of M.players) list.push('victory' + p.color);
-        if (S.teamPlay) list.push('team0', 'team1');
+        AB.victory.prefetch();
         if (S.goldBomberman) list.push('roulette');
         for (let i = 0; i < nG; i++) list.push('glue' + i);
         G.prefetch(list);
@@ -495,7 +524,7 @@
       if (this.readySent) { const w = AB.netmatch.waitingFor ? AB.netmatch.waitingFor() : []; txt = w.length ? 'Waiting for ' + w.join(', ') + '...' : 'Waiting for the other computers...'; }
       else if (this.t > AB.TPS * 3 && !this.img) txt = 'Loading the arena...';
       centerText(ctx, txt, 232, WHITE);
-      const prog = ((this.img ? 1 : 0) + this.prog * 3) / 4;
+      const prog = ((this.img ? 1 : this.hdProgress * 0.9) + this.prog * 3) / 4;
       if (!this.readySent && prog < 1 && this.t > 20) { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(220, 256, 200, 6); ctx.fillStyle = YELLOW; ctx.fillRect(220, 256, 200 * prog, 6); }
     },
   });
@@ -873,6 +902,8 @@
   SC.register('victory', {
     enter(w) {
       this.w = w; this.t = 0;
+      this.colors = AB.victory.contestants(AB.match, w, MS());
+      AB.victory.load(true);
       chatMusic('win', false); A.playRange(2000, 2299, 1, AB.match && AB.match.net ? AB.match.soundSeed + ':win' : undefined);
       AB.match.over = true;
     },
@@ -891,8 +922,7 @@
     tick() { this.t++; },
     render(ctx) {
       const w = this.w;
-      if (MS().teamPlay && w.team !== undefined) G.blit(ctx, 'team' + (w.team ? 1 : 0), 0, 0);
-      else G.blit(ctx, 'victory' + w.p.color, 0, 0);
+      AB.victory.draw(ctx, this.colors.winnerColor, this.colors.loserColor);
       const txt = MS().teamPlay && w.team !== undefined ? `TEAM ${w.team ? 'RED' : 'WHITE'} WINS THE MATCH!`
         : netName(w.p.slot) ? netName(w.p.slot).toUpperCase() + ' WINS THE MATCH!' : AB.msg(36, 'PLAYER %u WINS THE MATCH!').replace('%u', w.p.slot + 1);
       panel(ctx, 120, 412, 400, 34, 0.55);
@@ -937,7 +967,7 @@
         const x = c[0] + Math.cos(a) * r[0] * 0.95, y = c[1] + 40 + Math.sin(a) * r[1] * 0.9;
         const im = G.image(ROUL[i][0]);
         if (i === sel) { ctx.fillStyle = (this.t >> 2) % 2 ? '#ffe040' : '#ff8000'; ctx.fillRect(x - 24, y - 22, 48, 44); }
-        if (im.complete) ctx.drawImage(im, x - 20, y - 18);
+        if (im.complete) ctx.drawImage(im, x - 20, y - 18, 40, 36);
       }
       if (this.done) {
         panel(ctx, 120, 400, 400, 60, 0.85);
@@ -1177,8 +1207,8 @@
         if (y > 90 && y < 480) G.text(ctx, s.trim(), 320, y, /^[*~=]/.test(s) ? YELLOW : WHITE, 'font0', 1, false);
       });
       ctx.restore();
-      ctx.drawImage(G.image('kurt'), 520, 380);
-      ctx.drawImage(G.image('jerm'), 20, 360);
+      G.blit(ctx, 'kurt', 520, 380);
+      G.blit(ctx, 'jerm', 20, 360);
     },
   });
 
