@@ -158,6 +158,13 @@ These are under main menu > Options, next to the original settings.
   random ticked one instead) and *Shuffle ticked tracks*. Untick everything for silent rounds.
   Leaving the list brings the menu music back. This replaces the original "Disable music during
   gameplay" switch.
+* **Seamless loops.** The menu music and three level tracks (Battle, Pyramid, Sewer) end by
+  repeating their opening bars (the menu: its first two bars, 3.8 s), so looping the whole file
+  played those bars twice, after a small gap. The port finds where each track's opening comes
+  round again (cross-correlating the opening with the end: 0.93-0.99 alike) and loops just the
+  part before it, through Web Audio, with the first 20 ms blended in from what followed the cut so
+  there is no click (`AB.audio.MUSIC_LOOPS` in js/audio.js). Opened from disk (file://), they loop
+  the old way.
 * **Sounds & Voices** is a browser for every sound, including the roughly 1,050 recordings on
   the CD that the game never used. It has three levels:
   * game events, such as "Taunt after a kill" or "Explosion";

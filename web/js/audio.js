@@ -11,7 +11,7 @@
   const A = AB.audio = {};
   const SL = window.AB_DATA.sounds;          // SOUNDLST id -> clip name
   const CAT = window.AB_SOUNDS || { events: [], clips: {} };
-  let ctx = null, sfxGain = null;
+  let ctx = null, sfxGain = null, musicGain = null;
   const buffers = {};                        // name -> AudioBuffer | Promise | 'bad'
   const playing = [];
   let music = null, musicName = null, musicVol = 0.7, sfxVol = 0.9, enabled = true;
@@ -187,6 +187,9 @@
       if (!C) return;
       ctx = new C();
       sfxGain = ctx.createGain(); sfxGain.gain.value = sfxVol; sfxGain.connect(ctx.destination);
+      musicGain = ctx.createGain(); musicGain.gain.value = musicVol * duck; musicGain.connect(ctx.destination);
+      // a seamless-loop track that had to start on an <audio> element: carry on in Web Audio from here
+      if (music && musicName && music.loop && A.MUSIC_LOOPS[musicName] && canFetch()) startLoop(musicName, music.currentTime || 0);
     }
     if (ctx.state === 'suspended') ctx.resume();
     if (music && music.paused && musicName) music.play().catch(() => {});
@@ -298,7 +301,10 @@
       L.pc2.ontrack = (e) => {
         L.el.srcObject = e.streams[0] || new MediaStream([e.track]);
         L.el.play().catch(() => {});
-        const go = () => { if (loop !== L || L.live) return; L.live = true; try { sfxGain.disconnect(); } catch (x) {} sfxGain.connect(L.dest); };
+        const go = () => {
+          if (loop !== L || L.live) return; L.live = true;
+          for (const n of [sfxGain, musicGain]) { try { n.disconnect(); } catch (x) {} n.connect(L.dest); }
+        };
         if (L.pc2.connectionState === 'connected') go();
         L.pc2.onconnectionstatechange = () => { if (L.pc2.connectionState === 'connected') go(); else if (['failed', 'closed'].includes(L.pc2.connectionState)) A.setEchoSafe(false); };
       };
@@ -315,24 +321,73 @@
       setTimeout(() => { if (loop === L && !L.live) { console.warn('echo-safe output: no connection, game sounds play directly'); A.setEchoSafe(false); } }, 5000);
     } else if (loop) {
       const L = loop; loop = null;
-      if (L.live && ctx) { try { sfxGain.disconnect(); } catch (x) {} sfxGain.connect(ctx.destination); }
+      if (L.live && ctx) for (const n of [sfxGain, musicGain]) { try { n.disconnect(); } catch (x) {} n.connect(ctx.destination); }
       try { L.pc1.close(); L.pc2.close(); } catch (x) {}
       L.el.srcObject = null; L.el.remove();
     }
   };
 
   // ---- music ----
-  A.music = function (name, loop = true) {
-    if (name === musicName && music) return;
-    A.stopMusic();
-    if (!name) return;
-    musicName = name;
+  // Music streams through an <audio> element, except the tracks below.
+  //
+  // Seamless loops: these tracks end by repeating their opening bars (the menu: its first two bars,
+  // 3.83 s), so with <audio loop> those bars came twice, after a small gap. They play through Web
+  // Audio instead: the track up to where its opening comes round again (found by cross-correlating
+  // the opening with the end of the track: 0.93-0.99 alike), then straight back to the start. The
+  // first 20 ms are blended in from what followed the cut, so the end runs on into the start
+  // without a click. (Times in seconds of the decoded track.)
+  A.MUSIC_LOOPS = { menu: 26.865488, battle: 129.642177, pyramid: 116.321179, sewer: 107.047528 };
+  const loopCache = new Map();               // name -> loop buffer (just the menu's: the rest are long)
+  let wl = null;                             // the Web Audio loop playing: { name, src }
+  const canFetch = () => !!window.fetch && location.protocol !== 'file:';
+  function makeLoop(buf, endSec) {
+    const sr = buf.sampleRate, end = Math.min(buf.length, Math.round(endSec * sr));
+    const F = Math.max(0, Math.min(Math.round(0.02 * sr), buf.length - end));
+    const out = ctx.createBuffer(buf.numberOfChannels, end, sr);
+    for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+      const x = buf.getChannelData(ch), y = out.getChannelData(ch);
+      y.set(x.subarray(0, end));
+      for (let i = 0; i < F; i++) { const t = i / F; y[i] = x[end + i] * (1 - t) + x[i] * t; }
+    }
+    return out;
+  }
+  A.makeLoop = (buf, endSec) => makeLoop(buf, endSec);       // (for tests)
+  A.loopPlaying = () => (wl && wl.src ? wl.name : null);
+  function startLoop(name, offset = 0) {
+    const tok = wl = { name, src: null };
+    const go = (lb) => {
+      if (wl !== tok || musicName !== name) return;
+      const s = ctx.createBufferSource(); s.buffer = lb; s.loop = true; s.connect(musicGain);
+      s.start(0, offset % lb.duration);
+      tok.src = s;
+      if (music) { try { music.pause(); } catch (e) {} music.src = ''; music = null; }   // (it was carrying on until now)
+    };
+    if (loopCache.has(name)) { go(loopCache.get(name)); return; }
+    fetch('audio/music/' + name + '.mp3')
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); })
+      .then(b => ctx.decodeAudioData(b))
+      .then((buf) => { const lb = makeLoop(buf, A.MUSIC_LOOPS[name]); if (name === 'menu') loopCache.set(name, lb); go(lb); })
+      .catch((e) => {
+        console.warn('music loop:', name, e.message);
+        if (wl === tok && musicName === name) { wl = null; if (!music) elementMusic(name, true); }
+      });
+  }
+  function elementMusic(name, loop) {
     music = new Audio('audio/music/' + name + '.mp3');
     music.loop = loop; music.volume = AB.clamp(musicVol * duck, 0, 1);
     music.play().catch(() => { /* needs a user gesture; unlock() retries */ });
+  }
+  A.music = function (name, loop = true) {
+    if (name === musicName && (music || wl)) return;
+    A.stopMusic();
+    if (!name) return;
+    musicName = name;
+    if (loop && A.MUSIC_LOOPS[name] && ctx && canFetch()) startLoop(name);
+    else elementMusic(name, loop);
   };
   A.stopMusic = function () {
     if (music) { try { music.pause(); } catch (e) {} music.src = ''; }
+    if (wl) { try { if (wl.src) wl.src.stop(); } catch (e) {} wl = null; }
     music = null; musicName = null;
   };
   A.musicName = () => musicName;
@@ -340,6 +395,7 @@
   let duck = 1;
   const applyVol = () => {
     if (music) music.volume = AB.clamp(musicVol * duck, 0, 1);
+    if (musicGain && ctx) { musicGain.gain.cancelScheduledValues(ctx.currentTime); musicGain.gain.setTargetAtTime(musicVol * duck, ctx.currentTime, 0.06); }
     if (sfxGain && ctx) { sfxGain.gain.cancelScheduledValues(ctx.currentTime); sfxGain.gain.setTargetAtTime(sfxVol * duck, ctx.currentTime, 0.06); }
   };
   A.setVolumes = function (m, s) { musicVol = m; sfxVol = s; applyVol(); };
