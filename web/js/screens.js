@@ -292,6 +292,7 @@
   }
   SC.register('players', {
     help: 'input',
+    textEntry: true,             // letters type names here (so M doesn't mute the music on this screen)
     enter() {
       this.sel = 0; this.err = null; this.errT = 0; this.cPresses = 0;
       A.music('menu');
@@ -299,6 +300,16 @@
     },
     key(k) {
       const s = AB.setup[this.sel];
+      // typing gives the highlighted player its own name instead of "Player N"; Backspace deletes, and
+      // deleting it all brings "Player N" back. (Space and . - ! ' only once a name has begun.)
+      const name = s.name || '';
+      if (!k.ctrl && k.key && k.key.length === 1 && (/[A-Za-z0-9]/.test(k.key) || (name && /[ .!'-]/.test(k.key)))) {
+        if (name.length < 12) s.name = name + k.key;
+        // the original's hidden way in: C five times on this screen (fcn.00410f81)
+        if (/c{5}$/i.test(s.name)) { s.name = s.name.slice(0, -5); AB.saveSetup(); SC.go('campaign'); return; }
+        A.play(20); return;
+      }
+      if (k.code === 'Backspace') { if (name) { s.name = name.slice(0, -1); A.play(21); } return; }
       if (k.code === 'ArrowUp') this.sel = (this.sel + 9) % 10;
       else if (k.code === 'ArrowDown') this.sel = (this.sel + 1) % 10;
       else if (k.code === 'ArrowRight') {
@@ -308,12 +319,9 @@
         if (nx.startsWith('ai:')) { s.control = 'ai'; s.aiLevel = nx.slice(3); } else s.control = nx;
         A.play(20);
       } else if (k.code === 'ArrowLeft') { s.control = 'off'; A.play(21); }
-      else if (k.code === 'KeyT') {
+      else if (k.code === 'Tab') {
         if (AB.settings.teamPlay) { s.team = s.team ? 0 : 1; A.play(20); }
         else { this.err = 'Enable Team Play in Options first'; this.errT = 120; }
-      } else if (k.code === 'KeyC' && !k.ctrl) {
-        // the original's hidden way in: press C five times on this screen (fcn.00410f81)
-        if (++this.cPresses >= 5) { this.cPresses = 0; AB.saveSetup(); SC.go('campaign'); }
       } else if (k.code === 'KeyA' && k.ctrl) { AB.setup.forEach(x => { if (x.control === 'off' || !x.control.startsWith('key')) x.control = 'ai'; }); }
       else if (isBack(k)) { AB.saveSetup(); SC.go('mainmenu'); }
       else if (isOK(k) || k.pad !== undefined && k.code === 'Enter') {
@@ -336,7 +344,7 @@
         const st = AB.setup[i], y = l[1] + i * l[2];
         if (i === this.sel) menuCursor(ctx, l[0] - 16, y + 17);
         miniHead(ctx, i, l[0] + 10, y);
-        const label = AB.msg(51, 'Player %u: %s').replace('%u', i + 1).replace('%s', controlLabel(st.control));
+        const label = st.name ? `${st.name}: ${controlLabel(st.control)}` : AB.msg(51, 'Player %u: %s').replace('%u', i + 1).replace('%s', controlLabel(st.control));
         G.text(ctx, label, l[0] + 26, y, st.control === 'off' ? GREY : i === this.sel ? YELLOW : WHITE, 'font1');
         // the AI's skill, small, after "AI"
         if (st.control === 'ai') G.text(ctx, AB.AI.LEVEL_NAMES[st.aiLevel || 'hard'].toLowerCase(), l[0] + 32 + G.textWidth(label, 'font1'), y + 3, CYAN, 'font0');
@@ -353,7 +361,7 @@
         const dirs = L.up === 'ArrowUp' && L.down === 'ArrowDown' && L.left === 'ArrowLeft' ? 'Arrows' : `${kl(L.up)}${kl(L.left)}${kl(L.down)}${kl(L.right)}`;
         G.text(ctx, `KEY ${i}:  ${dirs}   bomb ${kl(L.bomb)}   action ${kl(L.action)}`, jl[0], ky + 24 + i * 20, WHITE, 'font0');
       });
-      G.text(ctx, 'Right: change (AI: easy, medium, original)   Left: off   T: team   Enter: continue', 320, 418, GREY, 'font0', 1);
+      G.text(ctx, 'Type: name   Right: change (AI: easy, medium, original)   Left: off   Tab: team   Enter: continue', 320, 418, GREY, 'font0', 1);
       f1Hint(ctx);
       if (this.errT > 0) { panel(ctx, 100, 200, 440, 50, 0.9); centerText(ctx, this.err, 216, ORANGE); }
     },
@@ -422,7 +430,7 @@
   // ---------------------------------------------------------------- match control
   function activeSetup() {
     const list = [];
-    AB.setup.forEach((s, i) => { if (s.control !== 'off') list.push({ slot: i, color: i, team: s.team, ai: s.control === 'ai', aiLevel: s.aiLevel || 'hard', control: s.control, name: 'Player ' + (i + 1) }); });
+    AB.setup.forEach((s, i) => { if (s.control !== 'off') list.push({ slot: i, color: i, team: s.team, ai: s.control === 'ai', aiLevel: s.aiLevel || 'hard', control: s.control, name: s.name || 'Player ' + (i + 1), custom: !!s.name }); });
     return list;
   }
   function startMatch(demo) {
@@ -622,7 +630,7 @@
         if (!p.alive) continue;
         const mp = M.players.find(q => q.slot === p.slot);
         const name = M.net && mp && mp.name ? mp.name
-          : p.isAI ? 'AI ' + (p.slot + 1) : AB.msg(33, 'Player %u').replace('%u', p.slot + 1);
+          : mp && mp.custom ? mp.name : p.isAI ? 'AI ' + (p.slot + 1) : AB.msg(33, 'Player %u').replace('%u', p.slot + 1);
         const w = Math.min(G.textWidth(name, 'font0'), 140) + 10;
         const x = AB.clamp(Math.round(p.x), w / 2 + 2, 638 - w / 2), y = Math.max(46, Math.round(p.y) - 62);
         ctx.fillStyle = 'rgba(0,0,0,0.72)'; ctx.fillRect(x - w / 2, y - 2, w, 14);
@@ -747,7 +755,8 @@
   // match rules: a network match uses the host's settings
   const MS = () => (AB.match && AB.match.S) || AB.settings;
   // network matches name their players ("Alice", "Computer 1"); local ones say "Player 3" like the original
-  const netName = (slot) => { const M = AB.match, p = M && M.net && M.players.find(q => q.slot === slot); return p ? p.name : null; };
+  // a player's own name: everyone's in a network match, and the ones typed on Player Setup in local play
+  const netName = (slot) => { const M = AB.match, p = M && M.players && M.players.find(q => q.slot === slot); return p && (M.net || p.custom) ? p.name : null; };
   const pLabel = (slot) => netName(slot) || AB.msg(33, 'Player %u').replace('%u', slot + 1);
   function matchWinner() {
     const M = AB.match, S = MS();

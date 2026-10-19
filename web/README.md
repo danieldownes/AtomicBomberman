@@ -93,6 +93,11 @@ NETWORK.md.
 Start Game > Player Setup: Right cycles a player through *AI easy*, *AI medium* and *AI original*,
 then the keyboards and joysticks.
 
+Typing on Player Setup gives the highlighted player its own name in place of "Player 3" (up to 12
+characters); Backspace deletes, and an empty name is "Player 3" again. The name shows on the name
+tags at the round start, the results and the victory screen. Tab switches a player's team (T now
+types).
+
 * **Original:** the port's AI, as before.
 * **Medium:** thinks it over less often, notices other players' bombs later, chases less and grabs
   fewer power-ups.
