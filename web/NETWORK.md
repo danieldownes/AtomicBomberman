@@ -84,7 +84,8 @@ needs no server of its own, so it works from GitHub Pages as it is.
 * **V** mutes or unmutes your microphone, in the room and in game (unless V is one of your
   keyboard layout's keys). A speaker by a name in the room, or over a bomberman, shows who is
   talking; a crossed-out microphone, who is muted or has none.
-* **Voice chat settings** (Room > Voice chat, each player's own): voice chat on or off, the
+* **Voice chat settings** (Room > Voice chat, or Voice chat in the lobby to choose and test the
+  microphone before joining; each player's own): voice chat on or off, the
   microphone (and Enter to ask the browser again after a refusal), which microphone, the
   **voice gate** (sends only while you speak: the level meter shows your voice, the yellow mark
   where the gate opens; levels 1-10 are -60 to -24 dBFS, it stays open 0.45 s after you stop),

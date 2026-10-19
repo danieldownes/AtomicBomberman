@@ -16,7 +16,7 @@ window.AB = window.AB || {};
   {
     const V = window.AB_VERSION || {};
     const stamped = /^\d+$/.test(V.build || '') && /^[0-9a-f]{7,40}$/.test(V.commit || '');
-    const base = V.base || '1.0';
+    const base = V.base || '1.1';
     AB.VERSION = {
       base, build: stamped ? +V.build : null, commit: stamped ? V.commit : null, date: stamped ? V.date : null,
       text: stamped ? `v${base}.${V.build}` : `v${base} dev`,                          // "v1.0.9"

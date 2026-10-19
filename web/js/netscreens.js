@@ -362,7 +362,7 @@
       A.music('menu');
     },
     leave() { if (!NP.room) NP.leaveLobby(); },
-    rows() { return [{ k: 'name' }, { k: 'local' }, { k: 'room', n: 1 }, { k: 'room', n: 2 }, { k: 'room', n: 3 }, { k: 'back' }]; },
+    rows() { return [{ k: 'name' }, { k: 'local' }, { k: 'room', n: 1 }, { k: 'room', n: 2 }, { k: 'room', n: 3 }, { k: 'voice' }, { k: 'back' }]; },
     key(k) {
       const S = AB.settings;
       if (this.editing) {
@@ -381,6 +381,7 @@
         if (row.k === 'back') { NP.shutdown(); SC.go('mainmenu'); return; }
         if (row.k === 'name') { this.editing = true; A.play(10); return; }
         if (row.k === 'local') { A.play(10); SC.go('netlocal'); return; }
+        if (row.k === 'voice') { A.play(10); SC.go('netvoice'); return; }
         if (NP.lobby.status !== 'online') { this.err = 'Not connected to the matchmaking server yet.'; this.errT = 180; return; }
         A.play(10);
         const r = NP.lobby.rooms[row.n - 1];
@@ -403,7 +404,7 @@
       const rows = this.rows();
       rows.forEach((row, i) => {
         const sel = i === this.sel;
-        const y = row.k === 'name' ? 82 : row.k === 'local' ? 106 : row.k === 'back' ? 372 : 146 + (row.n - 1) * 72;
+        const y = row.k === 'name' ? 82 : row.k === 'local' ? 106 : row.k === 'voice' ? 358 : row.k === 'back' ? 384 : 146 + (row.n - 1) * 70;
         const h = row.k === 'room' ? 62 : 22;
         if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.14)'; ctx.fillRect(42, y - 4, 556, h); U.menuCursor(ctx, 56, y + 16); }
         if (row.k === 'name') {
@@ -417,6 +418,9 @@
           lp.forEach((c, j) => U.miniHead(ctx, lc[j], 210 + j * 20, y + 2));
           G.text(ctx, lp.map(c => c.toUpperCase().replace(/(\D+)(\d)/, '$1 $2')).join(', '), 214 + lp.length * 20, y + 2, CYAN, 'font0');
           if (sel) G.text(ctx, 'Enter: change', 590, y + 2, GREY, 'font0', 2);
+        } else if (row.k === 'voice') {
+          G.text(ctx, 'Voice chat  >', 74, y, sel ? YELLOW : WHITE, 'font1');
+          G.text(ctx, AB.voice.cfg().on ? 'On  -  choose and test your microphone' : 'Off', 214, y + 2, CYAN, 'font0');
         } else if (row.k === 'back') {
           G.text(ctx, 'Back', 74, y, sel ? YELLOW : WHITE, 'font1');
         } else {
@@ -683,8 +687,13 @@
     help: 'portnet',
     enter() {
       if (this.sel === undefined) this.sel = 0;
-      this.devs = []; this.refreshDevices();
+      // from the lobby: the microphone runs only while this screen is open, to choose and test it
+      this.preview = !NP.room;
+      if (this.preview && AB.voice.cfg().on) AB.voice.start();
+      this.devs = []; this.refreshDevices(); this.devT = 0;
     },
+    leave() { if (this.preview && !NP.room) AB.voice.stop(); },
+    back() { AB.voice.save(); SC.go(NP.room ? 'room' : 'network'); },
     refreshDevices() { AB.voice.devices().then((d) => { this.devs = d; }); },
     rows() {
       const V = AB.voice, c = V.cfg(), r = [{ k: 'on' }];
@@ -702,11 +711,11 @@
       const row = rows[this.sel], lr = k.code === 'ArrowLeft' ? -1 : k.code === 'ArrowRight' ? 1 : 0, ok = U.isOK(k);
       if (k.code === 'ArrowUp') { this.sel = (this.sel + rows.length - 1) % rows.length; A.play(20); return; }
       if (k.code === 'ArrowDown') { this.sel = (this.sel + 1) % rows.length; A.play(21); return; }
-      if (U.isBack(k) || (ok && row.k === 'done')) { V.save(); SC.go(NP.room ? 'room' : 'network'); return; }
+      if (U.isBack(k) || (ok && row.k === 'done')) { this.back(); return; }
       if (!lr && !ok) return;
       const d = lr || 1;
       switch (row.k) {
-        case 'on': c.on = !c.on; V.save(); if (c.on && NP.room) V.start(); else V.stop(); break;
+        case 'on': c.on = !c.on; V.save(); if (c.on && (NP.room || this.preview)) V.start(); else V.stop(); break;
         case 'mic':
           if (V.mic === 'live') V.toggleMute();
           else { V.retryMic(); setTimeout(() => this.refreshDevices(), 1500); }
@@ -725,7 +734,11 @@
       }
       A.play(20);
     },
-    tick() { if (!NP.room) SC.go('network'); },
+    tick() {
+      if (!NP.room && !this.preview) { SC.go('network'); return; }
+      // microphone names appear once the browser has allowed one, and devices come and go
+      if (++this.devT % 120 === 0) this.refreshDevices();
+    },
     render(ctx) {
       const V = AB.voice, c = V.cfg(), rows = this.rows();
       U.glueDim(ctx, 5);
@@ -741,7 +754,7 @@
           case 'on': L('Voice chat', c.on ? 'On' : 'Off'); break;
           case 'mic': L('Microphone', V.mic === 'live' ? (V.muted ? 'Muted (V)' : 'On') : (MIC_TEXT[V.mic] || V.mic), V.mic === 'live' && !V.muted ? CYAN : ORANGE);
             if (sel && V.mic !== 'live') G.text(ctx, 'Enter: ask again', 590, y + 2, GREY, 'font0', 2); break;
-          case 'dev': L('Microphone device', devName()); break;
+          case 'dev': L('Microphone device', devName()); if (sel) G.text(ctx, `Left/Right: ${this.devs.length || 1} found`, 590, y + 2, GREY, 'font0', 2); break;
           case 'gate': L('Voice gate', c.gate ? 'On: sends only while you speak' : 'Off: always sends'); break;
           case 'lvl': {
             L('Gate level', String(c.gateLevel));
@@ -762,11 +775,11 @@
             G.text(ctx, !row.m.voice ? 'voice chat off' : st === 'connected' ? '' : 'connecting...', 590, y + 2, GREY, 'font0', 2);
             break;
           }
-          case 'done': G.text(ctx, 'Back to the room', 70, y, col, 'font1'); break;
+          case 'done': G.text(ctx, NP.room ? 'Back to the room' : 'Back to the lobby', 70, y, col, 'font1'); break;
         }
       });
       const tip = V.mic === 'denied' ? 'Your browser blocked the microphone: allow it in the address bar, then Enter on Microphone. You still hear the others.'
-        : 'Headphones sound clearest. You are heard while the bar is green (the yellow mark is the gate).';
+        : 'Headphones sound clearest. Others hear you while the level bar is green.';
       G.text(ctx, fit(tip, 560, 'font0'), 320, 398, GREY, 'font0', 1);
       G.text(ctx, 'Up/Down: choose   Left/Right: change   Enter: toggle   Esc: back', 320, 420, GREY, 'font0', 1);
     },

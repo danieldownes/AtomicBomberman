@@ -243,8 +243,10 @@
       // fcn.0042b9ce: "bomb trigger green" animates next to the selected item (#700: x, y, spacing)
       const m = AB.val(700, [332, 140, 38, 0]);
       G.draw(ctx, 'bomb trigger green', Math.floor(frame / AB.TPR), m[0], m[1] + this.sel * m[2], -1, false);
-      G.text(ctx, AB.VERSION.text.toUpperCase().replace(' DEV', ''), 50, 0, WHITE, 'font1');
-      G.text(ctx, AB.VERSION.commit ? AB.VERSION.commit + '  ' + AB.VERSION.date : 'dev build', 52, 22, GREY, 'font0');
+      // the version, and on the same line its commit and date
+      const ver = AB.VERSION.text.toUpperCase().replace(' DEV', '');
+      G.text(ctx, ver, 50, 0, WHITE, 'font1');
+      G.text(ctx, AB.VERSION.commit ? AB.VERSION.commit + '  ' + AB.VERSION.date : 'dev build', 50 + G.textWidth(ver, 'font1') + 10, 2, GREY, 'font0');
       if (this.confirm) {
         panel(ctx, 170, 200, 300, 80, 0.85);
         centerText(ctx, AB.msg(10, 'Are you sure you want to exit?'), 220, YELLOW);

@@ -34,10 +34,11 @@ progress bar.
 
 ## Versions
 
-The main menu shows the version, for example **V1.0.9**, with the commit hash and date under it.
+The main menu shows the version in its top left corner, for example **V1.1.24**, with the commit
+hash and date beside it.
 The network lobby shows it too.
 
-* `1.0` is set by hand in `web/index.html` (`window.AB_VERSION.base`).
+* `1.1` is set by hand in `web/index.html` (`window.AB_VERSION.base`; it was 1.0 until October 2026).
 * The last number is the build: the number of commits on main, so it goes up with every commit.
 * The build number, commit hash and date are filled in by `.github/workflows/pages.yml` when it
   deploys the site. A copy run from disk shows "dev build".
