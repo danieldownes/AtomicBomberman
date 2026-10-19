@@ -48,6 +48,8 @@
         if (AB.netmatch) AB.netmatch.say(m ? 'Your microphone is muted (V to unmute).' : 'Your microphone is on (V to mute).', 2.5);
         continue;
       }
+      // (a screen can give M its own meaning: the network room and results mute just their own music)
+      if (k.code === 'KeyM' && !cur.textEntry && !playerKey && cur.musicKey) { cur.musicKey(); continue; }
       if (k.code === 'KeyM' && !cur.textEntry && !playerKey) {
         AB.musicMuted = !AB.musicMuted; A.setVolumes(AB.musicMuted ? 0 : AB.settings.musicVolume, AB.settings.sfxVolume); continue;
       }
@@ -734,12 +736,14 @@
 
   // ================================================================= DRAW / RESULTS / VICTORY
   SC.register('draw', {
-    enter() { this.t = 0; A.music('draw', false); A.playRange(1700, 1999, 1, AB.match && AB.match.net ? AB.match.soundSeed + ':draw' : undefined); },
+    enter() { this.t = 0; chatMusic('draw', false); A.playRange(1700, 1999, 1, AB.match && AB.match.net ? AB.match.soundSeed + ':draw' : undefined); },
     key(k) { if (this.t > 30 && (isOK(k) || isBack(k))) SC.go('results'); },
     tick() { if (++this.t > AB.TPS * 6) SC.go('results'); },
     render(ctx) { G.blit(ctx, 'draw', 0, 0); },
   });
 
+  // the jingles between network rounds follow the room's music switch (js/netscreens.js toggleChatMusic)
+  const chatMusic = (track, loop) => { if (AB.match && AB.match.net && AB.netmatch) AB.netmatch.chatMusic(track, loop); else A.music(track, loop); };
   // match rules: a network match uses the host's settings
   const MS = () => (AB.match && AB.match.S) || AB.settings;
   // network matches name their players ("Alice", "Computer 1"); local ones say "Player 3" like the original
@@ -770,7 +774,9 @@
 
   AB.matchWinner = () => matchWinner();
   SC.register('results', {
-    enter() { this.t = 0; A.music('lose', false); this.winner = matchWinner(); this.pick = null; },
+    enter() { this.t = 0; chatMusic('lose', false); this.winner = matchWinner(); this.pick = null; },
+    // network match: M mutes the music of the room and results screens (to chat), not the game's
+    get musicKey() { return AB.match && AB.match.net ? () => AB.netmatch.toggleChatMusic() : null; },
     key(k) {
       if (this.t < 30) return;
       if (AB.match && AB.match.net) {
@@ -821,13 +827,15 @@
         let line = AB.msg(31, 'Player %u score: %u (kills: %d)').replace('%u', p.slot + 1).replace('%u', M.wins[p.slot] || 0).replace('%d', M.kills[p.slot] || 0);
         if (netName(p.slot)) line = line.replace(AB.msg(33, 'Player %u').replace('%u', p.slot + 1), netName(p.slot));
         G.text(ctx, line, row[0], y, won ? YELLOW : WHITE, 'font1');
+        // voice chat: a speaker after the line while that player's computer is talking
+        if (M.net && !p.ai && p.owner && AB.voice && AB.voice.isTalking(p.owner, p.owner === AB.netplay.myId())) AB.voice.drawIcon(ctx, row[0] + G.textWidth(line, 'font1') + 14, y + 8, 'talk', this.t);
         const w = M.wins[p.slot] || 0;
         for (let k = 0; k < w; k++) {
           if (wz.complete) ctx.drawImage(wz, 420 + k * 20, y - 1, 18, 18);
           miniHead(ctx, p.color, 429 + k * 20, y + 1);
         }
       });
-      if (M.net) AB.netmatch.drawBanner(ctx);
+      if (M.net) { AB.netmatch.drawBanner(ctx); G.text(ctx, 'M: music ' + (AB.settings.chatQuiet ? 'on' : 'off'), 320, 458, GREY, 'font0', 1); }
       if (M.net && !AB.netplay.isHost() && this.pick !== null) {
         const list = AB.netmatch.NUDGE_SOUNDS, x = 424, y = 162, h = 15;
         panel(ctx, x, y, 210, 30 + list.length * h, 0.88);
@@ -856,7 +864,7 @@
   SC.register('victory', {
     enter(w) {
       this.w = w; this.t = 0;
-      A.music('win', false); A.playRange(2000, 2299, 1, AB.match && AB.match.net ? AB.match.soundSeed + ':win' : undefined);
+      chatMusic('win', false); A.playRange(2000, 2299, 1, AB.match && AB.match.net ? AB.match.soundSeed + ':win' : undefined);
       AB.match.over = true;
     },
     key(k) {

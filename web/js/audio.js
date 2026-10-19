@@ -328,7 +328,7 @@
     if (!name) return;
     musicName = name;
     music = new Audio('audio/music/' + name + '.mp3');
-    music.loop = loop; music.volume = musicVol;
+    music.loop = loop; music.volume = AB.clamp(musicVol * duck, 0, 1);
     music.play().catch(() => { /* needs a user gesture; unlock() retries */ });
   };
   A.stopMusic = function () {
@@ -336,10 +336,14 @@
     music = null; musicName = null;
   };
   A.musicName = () => musicName;
-  A.setVolumes = function (m, s) {
-    musicVol = m; sfxVol = s;
-    if (music) music.volume = m;
-    if (sfxGain) sfxGain.gain.value = s;
+  // duck: a factor on both (voice chat turns the game down while someone talks); volumes stay as set
+  let duck = 1;
+  const applyVol = () => {
+    if (music) music.volume = AB.clamp(musicVol * duck, 0, 1);
+    if (sfxGain && ctx) { sfxGain.gain.cancelScheduledValues(ctx.currentTime); sfxGain.gain.setTargetAtTime(sfxVol * duck, ctx.currentTime, 0.06); }
   };
+  A.setVolumes = function (m, s) { musicVol = m; sfxVol = s; applyVol(); };
+  A.duckLevel = () => duck;
+  A.setDuck = function (f) { f = AB.clamp(f, 0, 1); if (f === duck) return; duck = f; applyVol(); };
   A.setEnabled = (e) => { enabled = e; };
 })(window.AB);

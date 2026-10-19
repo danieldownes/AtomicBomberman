@@ -232,17 +232,26 @@
     return [0, 1, 2, 3].map(i => (Number.isInteger(c[i]) && c[i] >= 0 && c[i] < 10 ? c[i] : [0, 3, 2, 4][i]));
   };
   // colours for everyone in the room: each player gets the one they asked for if nobody earlier has it,
-  // otherwise the next free one; computer players take what is left (host decides, in member order)
-  NP.assignColours = function (members, ais) {
+  // otherwise the next free one; computer players take what is left, in the room's random order
+  // (aiOrder: black always comes last, so a computer player is only black when nothing else is free).
+  // The host decides, in member order.
+  const BLACK = 1;
+  NP.shuffledAIOrder = function () {
+    const a = [0, 2, 3, 4, 5, 6, 7, 8, 9];
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a.concat(BLACK);
+  };
+  NP.assignColours = function (members, ais, order) {
+    order = order || (NP.room && NP.room.aiOrder) || [0, 2, 3, 4, 5, 6, 7, 8, 9, BLACK];
     const used = new Set(), out = [];
     const take = (want) => { let c = Number.isInteger(want) ? want : 0; for (let k = 0; k < 10 && used.has(c); k++) c = (c + 1) % 10; used.add(c); return c; };
     for (const m of members) for (const p of m.players) out.push(take(p.color));
-    for (let i = 0; i < ais; i++) out.push(take(0));
+    for (let i = 0; i < ais; i++) { const c = order.find(x => !used.has(x)); const col = c !== undefined ? c : take(0); used.add(col); out.push(col); }
     return out;
   };
   // each player's name: their own (AB.settings.netNames, set on the Players here screen), or else
   // the computer's name, numbered when it brings more than one player
-  NP.defaultPlayerName = (i, count) => (count > 1 ? `${AB.settings.netName} ${i + 1}` : AB.settings.netName);
+  NP.defaultPlayerName = (i, count, base = AB.settings.netName) => (count > 1 ? `${base} ${i + 1}` : base);
   NP.localNames = function (count) {
     const own = Array.isArray(AB.settings.netNames) ? AB.settings.netNames : [];
     return Array.from({ length: count }, (_, i) => (typeof own[i] === 'string' && own[i].trim() ? own[i].trim().slice(0, 16) : NP.defaultPlayerName(i, count)));
@@ -263,7 +272,7 @@
 
   function baseRoom(n, host) {
     return {
-      n, host, me: host ? 'host' : null, members: [], state: 'waiting', ais: AB.settings.netAIs | 0, log: [], connecting: true,
+      n, host, me: host ? 'host' : null, members: [], state: 'waiting', ais: AB.settings.netAIs | 0, log: [], connecting: true, aiOrder: NP.shuffledAIOrder(),
       aiLevel: AB.AI.LEVELS.includes(AB.settings.netAILevel) ? AB.settings.netAILevel : 'hard',
       say(t) { this.log.push(t); if (this.log.length > 5) this.log.shift(); },
       fail: null,
@@ -380,6 +389,13 @@
       else if (m.t === 'ls') { hostBroadcast(room, m, member); emit({ t: 'ls', r: m.r, m: m.m }); }
       else if (m.t === 'g') { const b = toBytes(m.d); if (b) hostGamePacket(room, member, b); }      // (no game channel yet)
       else if (m.t === 'mesh') { member.direct = new Set(Array.isArray(m.ids) ? m.ids : []); }
+      else if (m.t === 'players' && Array.isArray(m.players)) {
+        // new names / colours for the same players (how many, and their controls, stay as they joined)
+        member.name = String(m.name || member.name).slice(0, 20);
+        member.players = member.players.map((p, i) => { const q = m.players[i]; return q ? Object.assign({}, p, { name: String(q.name || p.name).slice(0, 20), color: AB.clamp(q.color | 0, 0, 9) }) : p; });
+        room.say(member.name + ' changed names or colours.');
+        sendRoom(room);
+      }
       else if (m.t === 'vstate') { member.voice = !!m.on; member.mic = String(m.mic || ''); member.muted = !!m.muted; sendRoom(room); }
       else if (m.t === 'talk') { AB.voice.setTalking(member.id, !!m.on); hostBroadcast(room, { t: 'talk', id: member.id, on: !!m.on }, member); }
       else if (m.t === 'ready') { member.ready = m.round; emit({ t: 'ready' }); }
@@ -651,6 +667,20 @@
       }).catch(() => {});
     }
     return { route: conn._abRoute || null, rtt: conn._abRtt || null };
+  };
+  // names or colours changed while in a room (the players themselves stay): tell the host, who shows
+  // them to everyone and uses them from the next match on
+  NP.updateMyPlayers = function () {
+    const room = NP.room; if (!room) return;
+    const mine = localPlayers();
+    if (room.host) {
+      const me = room.members[0]; if (!me) return;
+      me.name = AB.settings.netName;
+      me.players = me.players.map((p, i) => Object.assign({}, p, mine[i] ? { name: mine[i].name, color: mine[i].color } : {}));
+      sendRoom(room);
+    } else if (room.conn && room.conn.open) {
+      try { room.conn.send({ t: 'players', name: AB.settings.netName, players: mine.map(p => ({ name: p.name, color: p.color })) }); } catch (e) {}
+    }
   };
   NP.setState = (st) => { if (NP.room && NP.room.host) { NP.room.state = st; sendRoom(NP.room); } };
 

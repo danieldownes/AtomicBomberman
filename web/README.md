@@ -98,8 +98,15 @@ then the keyboards and joysticks.
   fewer power-ups.
 * **Easy:** all of that, more so.
 
-In a test of 60 rounds per pairing, two of each against two of the other: Original beat Medium 39 to 16, Original beat Easy 42 to 9, and
-Medium beat Easy 33 to 13. In network games the host sets one skill for all the computer players.
+In a test of 60 rounds per pairing, two of each against two of the other: Original beat Medium 43 to 12, Original beat Easy 46 to 11,
+and Medium beat Easy 40 to 9. In network games the host sets one skill for all the computer players.
+
+Each computer player has its own random choices (seeded from the round and its slot, so network
+games stay in step), and they keep out of each other's way: of equally near safe cells they take
+the least crowded one, and they don't pick a cell another player stands on or another computer
+player is heading for. Before, two that met made the same choices from then on and walked around
+on top of each other: 8 computer players overlapped 3.6 % of the time (once for 25 s on end); now
+0.5 % (at most 10 s, when cornered together).
 
 ## Arenas
 

@@ -144,9 +144,32 @@
     return U;
   }
 
+  // Each computer player has its own random stream (seeded from the round's seed and its slot, kept in
+  // its state, so network games stay in step), and they keep out of each other's way: without that,
+  // two that met made the same choices from then on and walked around on top of each other.
+  function arand(st) {
+    let t = (st.rs = (st.rs + 0x6D2B79F5) >>> 0);
+    t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  // how crowded a cell is for p: other players standing on (or next to) it, or other computer
+  // players already heading there
+  function crowd(g, p, c) {
+    const x = c % COLS, y = (c / COLS) | 0;
+    let n = 0;
+    for (const o of g.players) {
+      if (o === p || !o.alive) continue;
+      const d = Math.abs(AB.cellX(o.x) - x) + Math.abs(AB.cellY(o.y) - y);
+      if (d === 0) n += 2; else if (d === 1) n += 0.5;
+      if (o.isAI && o.ai && o.ai.goal === c) n += 1.5;
+    }
+    return n;
+  }
+
   function think(g, p, lv) {
     const st = p.ai || (p.ai = {});
     if (st.lastBomb === undefined) { st.lastBomb = -999; st.target = -1; st.t = 0; st.moveTo = -1; st.moveT = 0; }
+    if (st.rs === undefined) st.rs = ((g.cfg.seed >>> 0) ^ Math.imul(p.slot + 1, 0x9E3779B1)) >>> 0;
     if (!p.alive || p.special === 5 || p.special === 6 || p.special === 7) return 0;
     const T = lv ? perceive(g, p, dangerMap(g, p), lv.see) : dangerMap(g, p);
     const cx = AB.cellX(p.x), cy = AB.cellY(p.y), here = idx(cx, cy);
@@ -164,9 +187,14 @@
     st.danger = !safe(here);
 
     if (!safe(here)) {
-      // flee: nearest reachable safe cell
-      let best = -1, bd = 1e9;
-      for (const c of path.order) if (safe(c) && path.dist[c] < bd) { bd = path.dist[c]; best = c; }
+      // flee: nearest reachable safe cell. Of the equally near ones, the one it was already running to,
+      // else the least crowded (ties broken the same way every tick, its own way: no dithering)
+      let best = -1, bd = 1e9, bc = 1e9;
+      for (const c of path.order) {
+        if (!safe(c) || path.dist[c] > bd) continue;
+        const cr = c === st.goal ? -1 : crowd(g, p, c) + (((Math.imul(c + 1, 2654435761) ^ Math.imul(p.slot + 1, 40503)) >>> 0) % 1000) / 10000;
+        if (path.dist[c] < bd || cr < bc) { bd = path.dist[c]; bc = cr; best = c; }
+      }
       goal = best;
       if (goal < 0) {
         // nowhere safe: choose the cell that burns latest
@@ -246,16 +274,18 @@
             const chase = lv ? lv.chase : 1;
             if (chase) for (const o of g.players) if (enemyOf(g, p, o)) { const dd = Math.abs(AB.cellX(o.x) - x) + Math.abs(AB.cellY(o.y) - y); if (dd <= 2) score += (3 - dd) * chase; }
             score -= path.dist[c] * 0.15;
-            if (score > 0) cand.push([score + g.rng.int(100) / 100, c]);
+            score -= crowd(g, p, c);           // not where someone else already is or is going
+            if (score > 0) cand.push([score + arand(st) * 1.5, c]);
           }
           cand.sort((a, b) => b[0] - a[0]);
-          st.target = cand.length ? cand[0][1] : (path.order.length > 1 ? path.order[1 + g.rng.int(path.order.length - 1)] : -1);
+          st.target = cand.length ? cand[0][1] : (path.order.length > 1 ? path.order[1 + Math.floor(arand(st) * (path.order.length - 1))] : -1);
         }
         goal = st.target;
         if (goal === here) { if (centred) st.target = -1; goal = -1; }
       }
     }
 
+    st.goal = goal;                          // (the others look at it: crowd)
     // ---- steer towards goal ----
     // commit to the neighbouring cell we started moving into until we are centred in it; this
     // avoids dithering on cell borders when the plan flips between ticks

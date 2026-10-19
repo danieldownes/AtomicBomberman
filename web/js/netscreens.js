@@ -146,6 +146,15 @@
   };
   NM.reset = function () { AB.audio.forceProfile(null); NM.nudges = {}; NM.session = null; NM.cfg = null; NM.pending = []; NM.goRound = 0; NM.myReady = 0; NM.forfeitSlots = null; if (AB.match && AB.match.net) AB.match = null; };
   // a drop may arrive before this computer has started the round it belongs to: keep it until then
+  // music on the room and results screens can be switched off (M there), so you can talk; the game's
+  // own music isn't affected. Personal (AB.settings.chatQuiet).
+  NM.chatMusic = function (track, loop) { if (AB.settings.chatQuiet) A.stopMusic(); else A.music(track, loop); };
+  NM.toggleChatMusic = function (track) {
+    AB.settings.chatQuiet = !AB.settings.chatQuiet; AB.saveSettings();
+    if (AB.settings.chatQuiet) A.stopMusic(); else if (track) A.music(track);
+    const text = AB.settings.chatQuiet ? 'Music off in the room and on the results (M: back on). The game keeps its music.' : 'Music on in the room and on the results.';
+    if (SC.name() === 'room' && NP.room) NP.room.say(text); else NM.say(text, 3);
+  };
   // a message over the top of the game (or results) screen for a few seconds: who dropped out, who's back
   NM.banner = null;
   NM.say = function (text, secs = 8) { NM.banner = { text, at: performance.now(), secs }; };
@@ -419,8 +428,8 @@
           G.text(ctx, lp.map(c => c.toUpperCase().replace(/(\D+)(\d)/, '$1 $2')).join(', '), 214 + lp.length * 20, y + 2, CYAN, 'font0');
           if (sel) G.text(ctx, 'Enter: change', 590, y + 2, GREY, 'font0', 2);
         } else if (row.k === 'voice') {
-          G.text(ctx, 'Voice chat  >', 74, y, sel ? YELLOW : WHITE, 'font1');
-          G.text(ctx, AB.voice.cfg().on ? 'On  -  choose and test your microphone' : 'Off', 214, y + 2, CYAN, 'font0');
+          G.text(ctx, 'Voice and sound  >', 74, y, sel ? YELLOW : WHITE, 'font1');
+          G.text(ctx, (AB.voice.cfg().on ? 'Voice chat on' : 'Voice chat off') + '  -  choose and test your microphone, volumes', 254, y + 2, CYAN, 'font0');
         } else if (row.k === 'back') {
           G.text(ctx, 'Back', 74, y, sel ? YELLOW : WHITE, 'font1');
         } else {
@@ -455,7 +464,10 @@
   SC.register('netlocal', {
     help: 'portnet',
     get textEntry() { return this.editing !== null; },
-    enter() {
+    // a: { room: true } - from inside a room: names and colours only (the players stay as they joined)
+    enter(a) {
+      this.inRoom = !!(a && a.room && NP.room);
+      this.cname = AB.settings.netName || '';
       const cur = NP.localControls();
       this.list = [0, 1, 2, 3].map(i => cur[i] || 'off');
       this.cols = NP.localColours().slice();
@@ -466,12 +478,16 @@
     },
     opts() { return SC.uiLate().controlOptions().filter(c => c !== 'ai'); },
     // each player has a control row, and a name and a colour row while it's on
-    rows() { const r = []; this.list.forEach((c, i) => { r.push({ k: 'ctl', i }); if (c !== 'off') r.push({ k: 'name', i }, { k: 'col', i }); }); return r; },
+    rows() {
+      const r = this.inRoom ? [{ k: 'cname' }] : [];
+      this.list.forEach((c, i) => { if (this.inRoom && c === 'off') return; r.push({ k: 'ctl', i }); if (c !== 'off') r.push({ k: 'name', i }, { k: 'col', i }); });
+      return r;
+    },
     // the name a player gets: their own, or the computer's (numbered among the players that are on)
     shownName(i) {
       if (this.names[i].trim()) return this.names[i].trim();
       const on = this.list.filter(c => c !== 'off').length, n = this.list.slice(0, i).filter(c => c !== 'off').length;
-      return NP.defaultPlayerName(n, on);
+      return NP.defaultPlayerName(n, on, this.cname.trim() || 'Bomberman');
     },
     key(k) {
       const o = this.opts(), rows = this.rows();
@@ -479,13 +495,19 @@
       const row = rows[this.sel];
       // typing a player's name: Enter or Esc ends it (an empty name means the computer's name again)
       if (this.editing !== null) {
-        const i = this.editing;
-        if (k.code === 'Enter' || k.code === 'Escape' || k.code === 'NumpadEnter') { this.names[i] = this.names[i].trim(); this.editing = null; A.play(10); }
-        else if (k.code === 'Backspace') this.names[i] = this.names[i].slice(0, -1);
-        else if (k.key && k.key.length === 1 && this.names[i].length < 16 && /[\w .!'-]/.test(k.key)) this.names[i] += k.key;
+        const i = this.editing, get = () => (i === 'c' ? this.cname : this.names[i]), set = (v) => { if (i === 'c') this.cname = v; else this.names[i] = v; };
+        if (k.code === 'Enter' || k.code === 'Escape' || k.code === 'NumpadEnter') { set(get().trim()); if (i === 'c' && !this.cname) this.cname = 'Bomberman'; this.editing = null; A.play(10); }
+        else if (k.code === 'Backspace') set(get().slice(0, -1));
+        else if (k.key && k.key.length === 1 && get().length < 16 && /[\w .!'-]/.test(k.key)) set(get() + k.key);
         return;
       }
       if (row.k === 'name' && U.isOK(k) && k.pad === undefined) { this.editing = row.i; if (!this.names[row.i]) this.names[row.i] = this.shownName(row.i); A.play(10); return; }
+      if (row.k === 'cname' && U.isOK(k) && k.pad === undefined) { this.editing = 'c'; A.play(10); return; }
+      // in a room the players themselves can't change (the host has counted them): only in the lobby
+      if (this.inRoom && (row.k === 'ctl' || row.k === 'cname') && (k.code === 'ArrowRight' || k.code === 'ArrowLeft')) {
+        if (row.k === 'ctl') { this.err = 'Keyboards and joysticks can only be changed in the lobby.'; this.errT = 150; A.play(40); }
+        return;
+      }
       if (k.code === 'ArrowUp') { this.sel = (this.sel + rows.length - 1) % rows.length; A.play(20); }
       else if (k.code === 'ArrowDown') { this.sel = (this.sel + 1) % rows.length; A.play(21); }
       else if (row.k === 'name' && (k.code === 'ArrowRight' || k.code === 'ArrowLeft')) return;
@@ -500,20 +522,30 @@
         AB.settings.netLocal = on;
         AB.settings.netColours = this.list.map((c, i) => (c !== 'off' ? this.cols[i] : -1)).filter(c => c >= 0);
         AB.settings.netNames = this.list.map((c, i) => (c !== 'off' ? this.names[i] : null)).filter(n => n !== null);
+        if (this.inRoom) {
+          AB.settings.netName = this.cname.trim() || 'Bomberman'; AB.settings.netNameSet = true;
+          AB.saveSettings(); A.play(10); NP.updateMyPlayers(); SC.go(NP.room ? 'room' : 'network'); return;
+        }
         AB.saveSettings(); A.play(10); SC.go('network');
       }
     },
-    tick() { if (this.errT > 0) this.errT--; },
+    tick() { if (this.errT > 0) this.errT--; if (this.inRoom && !NP.room) SC.go('network'); },
     render(ctx) {
       U.glueDim(ctx, 1);
       U.panel(ctx, 30, 22, 580, 420, 0.82);
-      U.centerText(ctx, 'PLAYERS ON THIS COMPUTER', 34, YELLOW);
-      G.text(ctx, 'Each computer brings up to four players. Computer players are added by the host in the room.', 320, 58, GREY, 'font0', 1);
+      U.centerText(ctx, this.inRoom ? 'NAMES AND COLOURS' : 'PLAYERS ON THIS COMPUTER', 34, YELLOW);
+      G.text(ctx, this.inRoom ? 'Everyone in the room sees the change. It applies from the next match.' : 'Each computer brings up to four players. Computer players are added by the host in the room.', 320, 58, GREY, 'font0', 1);
       const label = SC.uiLate().controlLabel, rows = this.rows();
       let y = 80;
       rows.forEach((row, ri) => {
         const sel = ri === this.sel, c = this.list[row.i];
-        if (row.k === 'ctl') {
+        if (row.k === 'cname') {
+          if (sel) U.menuCursor(ctx, 60, y + 15);
+          const editing = this.editing === 'c';
+          G.text(ctx, 'Computer name: ' + (editing ? this.cname + ((U.frame() >> 4) % 2 ? '_' : ' ') : this.cname), 104, y, editing ? WHITE : sel ? YELLOW : CYAN, 'font1');
+          if (sel && !editing) G.text(ctx, '(Enter: type it)', 470, y + 4, GREY, 'font0');
+          y += 24;
+        } else if (row.k === 'ctl') {
           if (row.i > 0) y += 4;
           if (sel) U.menuCursor(ctx, 60, y + 15);
           G.text(ctx, `Player ${row.i + 1}: ${label(c)}`, 104, y, c === 'off' ? GREY : sel ? YELLOW : WHITE, 'font1');
@@ -544,7 +576,7 @@
         });
         G.text(ctx, pads.length ? pads.map((p, i) => `JOY ${i}: ${p.id.slice(0, 28)}`).join('   ') : 'No joysticks detected (press a button on one to wake it up)', 100, ky + 18 + I.layouts.length * 16 + 6, GREY, 'font0');
       } else G.text(ctx, 'Keyboard layouts: Options > Define keyboard layouts.' + (pads.length ? `   ${pads.length} joystick(s) found.` : ''), 320, ky, GREY, 'font0', 1);
-      G.text(ctx, 'Left/Right: change (Left turns a player off)   Enter on a name: type it   Esc: done', 320, 418, GREY, 'font0', 1);
+      G.text(ctx, this.inRoom ? 'Enter on a name: type it   Left/Right on a colour: change   Esc: done' : 'Left/Right: change (Left turns a player off)   Enter on a name: type it   Esc: done', 320, 418, GREY, 'font0', 1);
       G.text(ctx, 'If two players want the same colour, the one who joined first keeps it.', 320, 400, GREY, 'font0', 1);
       if (this.errT > 0) { U.panel(ctx, 100, 200, 440, 50, 0.92); U.centerText(ctx, this.err, 216, ORANGE, 'font0'); }
     },
@@ -556,12 +588,12 @@
   const convName = (v) => [AB.msg(295, 'Slow'), AB.msg(296, 'Medium'), AB.msg(297, 'Fast')][v] || '';
   function settingsLines(set) {
     if (!set) return [];
+    const snd = set.sound ? `     Sounds: ${(A.PRESET_LABEL[set.sound.preset] || set.sound.preset).replace(/ \(.*\)/, '')}, variety ${(A.VARIETY_LABEL[set.sound.variety] || set.sound.variety).replace(/ \(.*\)/, '').toLowerCase()}` : '';
     const L = [`Scheme: ${set.scheme}     Arenas: ${set.arenas}`,
-               `Match: ${set.wins} ${set.byKills ? 'kills' : 'wins'} to win     Play time: ${U.fmtTime(set.time)}`];
+               `Match: ${set.wins} ${set.byKills ? 'kills' : 'wins'} to win     Play time: ${U.fmtTime(set.time)}${snd}`];
     if (set.conveyor !== undefined) {
       L.push(`Random start: ${yn(set.randomStart)}   Conveyors: ${convName(set.conveyor)}   Stomped bombs detonate: ${yn(set.stomped)}`);
       L.push(`Hurry walls: ${AB.msg(315 + set.enclosement, String(set.enclosement))}   Diseases destroyable: ${yn(set.diseases)}   Leavers become AIs: ${yn(set.lostToAI)}`);
-      if (set.sound) L.push(`Sounds for everyone: ${A.PRESET_LABEL[set.sound.preset] || set.sound.preset}, variety ${(A.VARIETY_LABEL[set.sound.variety] || set.sound.variety).toLowerCase()}`);
     }
     return L;
   }
@@ -569,25 +601,35 @@
     help: 'portnet',
     enter() {
       this.err = null; this.errT = 0;
-      NP.leaveLobby(); A.music('menu');
+      NP.leaveLobby(); NM.chatMusic('menu');
       if (NP.room && NP.room.host) { NP.room.inGame = false; NP.setState('waiting'); }
       // the host starts on START, a member on its only choice, Voice chat
       const rows = this.rows();
-      if (this.sel === undefined || this.sel >= rows.length || !(NP.room && NP.room.host)) this.sel = rows.findIndex(r => r.k === (NP.room && NP.room.host ? 'start' : 'voice'));
+      const own = this.sel !== undefined && rows[this.sel] && (NP.room && NP.room.host ? true : ['names', 'voice'].includes(rows[this.sel].k));
+      if (!own) this.sel = rows.findIndex(r => r.k === (NP.room && NP.room.host ? 'start' : 'voice'));
     },
+    musicKey() { NM.toggleChatMusic('menu'); },
     // members see the host's lines greyed out, and can only open their voice settings
-    rows() { return NP.room && NP.room.host ? [{ k: 'ais' }, { k: 'skill' }, { k: 'setup' }, { k: 'voice' }, { k: 'start' }] : [{ k: 'ais' }, { k: 'skill' }, { k: 'setup' }, { k: 'voice' }]; },
+    rows() { return NP.room && NP.room.host ? [{ k: 'ais' }, { k: 'skill' }, { k: 'setup' }, { k: 'names' }, { k: 'voice' }, { k: 'start' }] : [{ k: 'ais' }, { k: 'skill' }, { k: 'setup' }, { k: 'names' }, { k: 'voice' }]; },
     key(k) {
       const room = NP.room; if (!room) { SC.go('network'); return; }
       if (U.isBack(k) && k.pad === undefined) { NP.leave(); SC.go('network'); return; }
       const rows = this.rows(), row = rows[this.sel];
       if (row && row.k === 'voice' && U.isOK(k)) { A.play(10); SC.go('netvoice'); return; }
-      if (!room.host) return;
+      if (row && row.k === 'names' && U.isOK(k)) { A.play(10); SC.go('netlocal', { room: true }); return; }
+      if (!room.host) {
+        // a member chooses between its own two rows: names and voice
+        const mine = rows.map((r, i) => (r.k === 'names' || r.k === 'voice' ? i : -1)).filter(i => i >= 0);
+        if (k.code === 'ArrowUp' || k.code === 'ArrowDown') { this.sel = mine[(mine.indexOf(this.sel) + 1) % mine.length]; A.play(20); }
+        return;
+      }
       const humans = room.members.reduce((a, m) => a + m.players.length, 0);
       if (k.code === 'ArrowUp') { this.sel = (this.sel + rows.length - 1) % rows.length; A.play(20); }
       else if (k.code === 'ArrowDown') { this.sel = (this.sel + 1) % rows.length; A.play(21); }
       else if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight') && row.k === 'ais') {
+        const was = room.ais;
         room.ais = AB.clamp(room.ais + (k.code === 'ArrowLeft' ? -1 : 1), 0, NP.MAX_PLAYERS - humans);
+        if (room.ais !== was) room.aiOrder = NP.shuffledAIOrder();       // new colours for the computer players
         AB.settings.netAIs = room.ais; AB.saveSettings(); A.play(20); NP.refreshRoom();
       } else if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight' || U.isOK(k)) && row.k === 'skill') {
         const L = AB.AI.LEVELS, d = k.code === 'ArrowLeft' ? -1 : 1;
@@ -615,7 +657,7 @@
       const aiCols = room.host ? cols.slice(cols.length - room.ais) : (room.info && room.info.aiColours) || [];
       let slot = 0;
       room.members.forEach((m, i) => {
-        const y = 92 + i * 26, mine = m.id === room.me;
+        const y = 92 + i * 25, mine = m.id === room.me;
         if (mine) { ctx.fillStyle = 'rgba(96,240,96,0.10)'; ctx.fillRect(44, y - 4, 552, 24); }
         G.text(ctx, fit(m.name, 150) + (i === 0 ? '  (host)' : ''), 56, y, mine ? YELLOW : WHITE, 'font1');
         const vs = voiceIcon(m, mine);
@@ -626,13 +668,13 @@
         else G.text(ctx, Math.round(m.ping || 0) + ' ms', 584, y + 2, pingCol(m.ping || 0), 'font0', 2);
       });
       // the host's menu (members see the same lines, greyed)
-      const ys = 92 + Math.max(room.members.length, 2) * 26 + 4;
+      const ys = 92 + Math.max(room.members.length, 2) * 25 + 4;
       const set = room.host ? NP.matchSettings() : room.info && room.info.settings;
       const rows = this.rows();
       rows.forEach((row, i) => {
         const y = ys + i * 22, sel = i === this.sel;
         if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.14)'; ctx.fillRect(44, y - 3, 552, 21); U.menuCursor(ctx, 50, y + 15); }
-        const col = row.k === 'voice' ? (sel ? YELLOW : WHITE) : !room.host ? GREY : sel ? YELLOW : WHITE;
+        const col = row.k === 'voice' || row.k === 'names' ? (sel ? YELLOW : WHITE) : !room.host ? GREY : sel ? YELLOW : WHITE;
         if (row.k === 'ais') {
           G.text(ctx, `Computer players: ${room.ais}`, 70, y, col, 'font1');
           for (let k = 0; k < room.ais; k++) U.miniHead(ctx, aiCols[k] !== undefined ? aiCols[k] : slot + k, 290 + k * 20, y + 2);
@@ -643,10 +685,13 @@
         } else if (row.k === 'setup') {
           G.text(ctx, room.host ? 'Match settings  >' : 'Match settings:', 70, y, col, 'font1');
           if (sel) G.text(ctx, 'Enter: change', 590, y + 2, GREY, 'font0', 2);
+        } else if (row.k === 'names') {
+          G.text(ctx, 'Names and colours  >', 70, y, col, 'font1');
+          const mineM = room.members.find(m => m.id === room.me);
+          if (mineM) G.text(ctx, fit(mineM.players.map(p => (typeof p === 'string' ? p : p.name)).join(', '), 280, 'font0'), 312, y + 2, CYAN, 'font0');
         } else if (row.k === 'voice') {
-          G.text(ctx, 'Voice chat  >', 70, y, col, 'font1');
-          G.text(ctx, voiceSummary(), 230, y + 2, CYAN, 'font0');
-          if (sel) G.text(ctx, 'Enter: settings   V: mute', 590, y + 2, GREY, 'font0', 2);
+          G.text(ctx, 'Voice and sound  >', 70, y, col, 'font1');
+          G.text(ctx, fit(voiceSummary() + `  -  game sound ${Math.round(AB.settings.sfxVolume * 10)}`, 280, 'font0'), 312, y + 2, CYAN, 'font0');
         } else if (room.host) G.text(ctx, 'START THE MATCH!', 70, y, col, 'font1');
       });
       // the match settings lines go after the host's menu (above START for members, who have none)
@@ -656,7 +701,8 @@
       // recent events
       const logY = ly + lines.length * 14 + 6;
       room.log.slice(-AB.clamp(Math.floor((412 - logY) / 14), 0, 4) || room.log.length).forEach((t, i) => G.text(ctx, t, 56, logY + i * 14, '#9aa', 'font0'));
-      const hint = room.host ? 'Up/Down: choose   Enter: select   V: mute your microphone   Esc: close the room' : 'Enter: voice settings   V: mute your microphone   Esc: leave the room';
+      const mus = 'M: music ' + (AB.settings.chatQuiet ? 'on' : 'off');
+      const hint = room.host ? `Up/Down: choose   Enter: select   V: mute your mic   ${mus}   Esc: close the room` : `Up/Down: choose   Enter: open   V: mute your mic   ${mus}   Esc: leave the room`;
       G.text(ctx, hint, 320, 420, GREY, 'font0', 1);
       if (this.errT > 0) { U.panel(ctx, 60, 196, 520, 50, 0.92); U.centerText(ctx, fit(this.err, 500, 'font0'), 214, ORANGE, 'font0'); }
     },
@@ -696,7 +742,7 @@
     back() { AB.voice.save(); SC.go(NP.room ? 'room' : 'network'); },
     refreshDevices() { AB.voice.devices().then((d) => { this.devs = d; }); },
     rows() {
-      const V = AB.voice, c = V.cfg(), r = [{ k: 'on' }];
+      const V = AB.voice, c = V.cfg(), r = [{ k: 'sfx' }, { k: 'music' }, { k: 'duck' }, { k: 'on' }];
       if (c.on) {
         r.push({ k: 'mic' }, { k: 'dev' }, { k: 'gate' }, { k: 'lvl' }, { k: 'vol' }, { k: 'echo' });
         const room = NP.room, me = room ? (room.host ? 'host' : room.me) : null;
@@ -715,6 +761,9 @@
       if (!lr && !ok) return;
       const d = lr || 1;
       switch (row.k) {
+        case 'sfx': { const S = AB.settings; S.sfxVolume = AB.clamp(Math.round(S.sfxVolume * 10 + d) / 10, 0, 1); A.setVolumes(AB.musicMuted ? 0 : S.musicVolume, S.sfxVolume); AB.saveSettings(); A.playRange(400, 499); return; }
+        case 'music': { const S = AB.settings; S.musicVolume = AB.clamp(Math.round(S.musicVolume * 10 + d) / 10, 0, 1); A.setVolumes(AB.musicMuted ? 0 : S.musicVolume, S.sfxVolume); AB.saveSettings(); break; }
+        case 'duck': c.duck = !c.duck; V.save(); break;
         case 'on': c.on = !c.on; V.save(); if (c.on && (NP.room || this.preview)) V.start(); else V.stop(); break;
         case 'mic':
           if (V.mic === 'live') V.toggleMute();
@@ -743,23 +792,26 @@
       const V = AB.voice, c = V.cfg(), rows = this.rows();
       U.glueDim(ctx, 5);
       U.panel(ctx, 30, 22, 580, 420, 0.86);
-      U.centerText(ctx, 'VOICE CHAT', 34, YELLOW);
+      U.centerText(ctx, 'VOICE AND SOUND', 34, YELLOW);
       G.text(ctx, 'Everyone in the room hears everyone else. These settings are your own.', 320, 56, GREY, 'font0', 1);
       const devName = () => { if (!c.deviceId) return 'Default'; const x = this.devs.find(v => v.deviceId === c.deviceId); return x ? x.label || 'Microphone' : 'Default'; };
       rows.forEach((row, i) => {
-        const y = 78 + i * 22, sel = i === this.sel, col = sel ? YELLOW : WHITE;
+        const h = rows.length > 13 ? 20 : 22, y = 76 + i * h, sel = i === this.sel, col = sel ? YELLOW : WHITE;
         if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.14)'; ctx.fillRect(44, y - 3, 552, 21); U.menuCursor(ctx, 50, y + 15); }
-        const L = (a, b, bc = CYAN) => { G.text(ctx, a, 70, y, col, 'font1'); if (b !== undefined) G.text(ctx, fit(b, 280, 'font1'), 300, y, sel ? YELLOW : bc, 'font1'); };
+        const L = (a, b, bc = CYAN) => { G.text(ctx, a, 70, y, col, 'font1'); if (b !== undefined) G.text(ctx, fit(b, 250, 'font1'), 346, y, sel ? YELLOW : bc, 'font1'); };
         switch (row.k) {
+          case 'sfx': L('Game sound volume', Math.round(AB.settings.sfxVolume * 10) + ' / 10'); break;
+          case 'music': L('Game music volume', Math.round(AB.settings.musicVolume * 10) + ' / 10' + (AB.musicMuted ? '  (M: muted)' : '')); break;
+          case 'duck': L('Quieter game while others talk', c.duck ? 'On' : 'Off'); break;
           case 'on': L('Voice chat', c.on ? 'On' : 'Off'); break;
           case 'mic': L('Microphone', V.mic === 'live' ? (V.muted ? 'Muted (V)' : 'On') : (MIC_TEXT[V.mic] || V.mic), V.mic === 'live' && !V.muted ? CYAN : ORANGE);
             if (sel && V.mic !== 'live') G.text(ctx, 'Enter: ask again', 590, y + 2, GREY, 'font0', 2); break;
           case 'dev': L('Microphone device', devName()); if (sel) G.text(ctx, `Left/Right: ${this.devs.length || 1} found`, 590, y + 2, GREY, 'font0', 2); break;
-          case 'gate': L('Voice gate', c.gate ? 'On: sends only while you speak' : 'Off: always sends'); break;
+          case 'gate': L('Voice gate', c.gate ? 'On: only while you speak' : 'Off: always sends'); break;
           case 'lvl': {
             L('Gate level', String(c.gateLevel));
             // the microphone's level, and where the gate opens
-            const x0 = 330, w = 250, db = AB.clamp(V.levelDb(), -70, 0), thr = V.thresholdDb(c.gateLevel);
+            const x0 = 376, w = 204, db = AB.clamp(V.levelDb(), -70, 0), thr = V.thresholdDb(c.gateLevel);
             ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(x0, y + 3, w, 10);
             ctx.fillStyle = V.open ? '#60f060' : '#7a8a8a'; ctx.fillRect(x0, y + 3, Math.round(w * (db + 70) / 70), 10);
             ctx.fillStyle = YELLOW; ctx.fillRect(x0 + Math.round(w * (thr + 70) / 70) - 1, y, 2, 16);
@@ -771,7 +823,7 @@
             const v = V.volumeOf(row.m.name), st = V.remoteState(row.m.id);
             L('  ' + fit(row.m.name, 180, 'font1'), v ? v + ' / 10' : 'Muted', v ? CYAN : ORANGE);
             const vs = voiceIcon(row.m, false);
-            if (vs) V.drawIcon(ctx, 286, y + 9, vs, U.frame());
+            if (vs) V.drawIcon(ctx, 330, y + 9, vs, U.frame());
             G.text(ctx, !row.m.voice ? 'voice chat off' : st === 'connected' ? '' : 'connecting...', 590, y + 2, GREY, 'font0', 2);
             break;
           }

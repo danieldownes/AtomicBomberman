@@ -16,7 +16,8 @@
 (function (AB) {
   const V = AB.voice = {};
   const now = () => performance.now();
-  const DEF = { on: true, gate: true, gateLevel: 5, volume: 8, vols: {}, deviceId: '', echoSafe: true };
+  const DEF = { on: true, gate: true, gateLevel: 5, volume: 8, vols: {}, deviceId: '', echoSafe: true, duck: true };
+  const DUCK = 0.3;      // the game's sound and music while someone else talks (with "duck" on)
   V.cfg = function () {
     const S = AB.settings;
     if (!S.voice || typeof S.voice !== 'object') S.voice = {};
@@ -36,7 +37,7 @@
   V.onTalk = null;       // (open) -> void: set by js/netplay.js to tell the room
   V.onState = null;      // () -> void: voice on/off or mic state changed (js/netplay.js tells the host)
   let actx = null, dest = null, gain = null, analyser = null, buf = null, micStream = null, micSrc = null, timer = null;
-  let lastLoud = 0, active = false;
+  let lastLoud = 0, active = false, lastHeard = -1e9;
   const remotes = new Map();   // computer id -> { call, el, stream, at }
 
   V.active = () => active;
@@ -74,7 +75,7 @@
     for (const id of [...remotes.keys()]) V.dropRemote(id);
     stopMic();
     V.mic = 'off'; V.open = false; V.level = 0; V.talking = {};
-    AB.audio.setEchoSafe(false);
+    AB.audio.setEchoSafe(false); AB.audio.setDuck(1);
     if (V.onState) V.onState();
   };
   function stopMic() {
@@ -125,6 +126,9 @@
     const c = V.cfg(), t = now();
     if (20 * Math.log10(rms + 1e-9) > V.thresholdDb(c.gateLevel)) lastLoud = t;
     const open = V.mic === 'live' && !V.muted && (!c.gate || t - lastLoud < 450);
+    // someone else talking: the game goes quieter, back up half a second after they stop
+    if (Object.keys(V.talking).length) lastHeard = t;
+    AB.audio.setDuck(c.duck && t - lastHeard < 500 ? DUCK : 1);
     if (open !== V.open) {
       V.open = open;
       // quick to open, a little softer to close

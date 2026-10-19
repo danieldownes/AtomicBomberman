@@ -14,7 +14,9 @@ needs no server of its own, so it works from GitHub Pages as it is.
   Left turns it off. Enter on a name row types that player's own name (empty: the computer's name,
   numbered, e.g. "Bob 2"). On a colour row, Left and Right step through the ten colours.
   * The host sorts out clashes in joining order. A player who asks for a colour someone earlier
-    already has gets the next free one, and computer players take what's left.
+    already has gets the next free one, and computer players take what's left, in a random order
+    that changes whenever the host changes how many there are. Black always comes last, so a
+    computer player is only black when every other colour is taken.
 * The lobby lists Room 1, 2 and 3. Each shows whether it is empty, waiting for players or playing.
   It also shows the host, who is in the room with their pings, and the host's match settings.
 * Enter on an **empty** room makes you its host. Enter on a **waiting** room joins it. A room that
@@ -47,6 +49,11 @@ needs no server of its own, so it works from GitHub Pages as it is.
   as fast and keep going until the arena is full. This applies whether the humans died, forfeited or
   left. If an AI's kill leaves a single player standing, that's an ordinary win.
 * **Voice chat**: everyone in the room hears everyone else (see *Voice chat* below). V mutes you.
+* **Names and colours** (Room > Names and colours, everyone): change this computer's name, your
+  players' names and colours without leaving the room. Everyone sees the change; a match in
+  progress keeps its names until it ends. Keyboards and joysticks can only change in the lobby.
+* **Music in the room and on the results** (M there): off, so you can talk, and back on. The game
+  itself keeps its music. Personal, remembered.
 * **F9** shows the network figures: input delay, how far behind the confirmed game is, rollbacks
   per second and how deep they go, stalls, and how this computer reaches each of the others
   (direct, through the host, or through the TURN relay).
@@ -82,10 +89,12 @@ needs no server of its own, so it works from GitHub Pages as it is.
   hear you: in the room, between rounds and while playing. The browser asks once for the
   microphone; without one (or if you say no) you still hear the others.
 * **V** mutes or unmutes your microphone, in the room and in game (unless V is one of your
-  keyboard layout's keys). A speaker by a name in the room, or over a bomberman, shows who is
-  talking; a crossed-out microphone, who is muted or has none.
-* **Voice chat settings** (Room > Voice chat, or Voice chat in the lobby to choose and test the
-  microphone before joining; each player's own): voice chat on or off, the
+  keyboard layout's keys). A speaker by a name in the room, over a bomberman, or after a line on
+  the results screen shows who is talking; a crossed-out microphone, who is muted or has none.
+* **Voice and sound settings** (Room > Voice and sound, or the same row in the lobby to choose and
+  test the microphone before joining; each player's own): the game's sound and music volume (the
+  same as in Options), *Quieter game while others talk* (on by default: the game's sound and music
+  drop to 30 % while someone else speaks, back half a second after), and for voice chat: voice chat on or off, the
   microphone (and Enter to ask the browser again after a refusal), which microphone, the
   **voice gate** (sends only while you speak: the level meter shows your voice, the yellow mark
   where the gate opens; levels 1-10 are -60 to -24 dBFS, it stays open 0.45 s after you stop),
