@@ -189,7 +189,7 @@
       sfxGain = ctx.createGain(); sfxGain.gain.value = sfxVol; sfxGain.connect(ctx.destination);
       musicGain = ctx.createGain(); musicGain.gain.value = musicVol * duck; musicGain.connect(ctx.destination);
       // a seamless-loop track that had to start on an <audio> element: carry on in Web Audio from here
-      if (music && musicName && music.loop && A.MUSIC_LOOPS[musicName] && canFetch()) startLoop(musicName, music.currentTime || 0);
+      if (music && musicName && music.loop && A.MUSIC_LOOPS[musicName]) startLoop(musicName, music.currentTime || 0);
     }
     if (ctx.state === 'suspended') ctx.resume();
     if (music && music.paused && musicName) music.play().catch(() => {});
@@ -335,11 +335,28 @@
   // Audio instead: the track up to where its opening comes round again (found by cross-correlating
   // the opening with the end of the track: 0.93-0.99 alike), then straight back to the start. The
   // first 20 ms are blended in from what followed the cut, so the end runs on into the start
-  // without a click. (Times in seconds of the decoded track.)
+  // without a click. (Times in seconds of the decoded track.) Over http the game fetches the .mp3;
+  // opened from disk it loads the same track from audio/music/<name>.js (see trackBytes).
+  // tools/build_music_loops.py writes those scripts, and --measure finds these times again.
   A.MUSIC_LOOPS = { menu: 26.865488, battle: 129.642177, pyramid: 116.321179, sewer: 107.047528 };
   const loopCache = new Map();               // name -> loop buffer (just the menu's: the rest are long)
   let wl = null;                             // the Web Audio loop playing: { name, src }
   const canFetch = () => !!window.fetch && location.protocol !== 'file:';
+  // the track's bytes. Opened from disk (file://) the browser won't fetch, so these tracks also come as
+  // scripts, audio/music/<name>.js, calling AB_MUSIC(name, base64 mp3) (tools/build_music_loops.py)
+  const musicWait = {};
+  window.AB_MUSIC = function (name, b64) { const w = musicWait[name]; delete musicWait[name]; if (w) w(b64); };
+  function trackBytes(name) {
+    if (canFetch()) return fetch('audio/music/' + name + '.mp3').then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); });
+    return new Promise((resolve, reject) => {
+      const el = document.createElement('script');
+      musicWait[name] = (b64) => { el.remove(); resolve(b64ToBuf(b64)); };
+      el.onload = () => { if (musicWait[name]) { delete musicWait[name]; el.remove(); reject(new Error('no music in ' + el.src)); } };
+      el.onerror = () => { delete musicWait[name]; el.remove(); reject(new Error('missing ' + el.src)); };
+      el.src = 'audio/music/' + name + '.js';
+      document.head.appendChild(el);
+    });
+  }
   function makeLoop(buf, endSec) {
     const sr = buf.sampleRate, end = Math.min(buf.length, Math.round(endSec * sr));
     const F = Math.max(0, Math.min(Math.round(0.02 * sr), buf.length - end));
@@ -363,8 +380,7 @@
       if (music) { try { music.pause(); } catch (e) {} music.src = ''; music = null; }   // (it was carrying on until now)
     };
     if (loopCache.has(name)) { go(loopCache.get(name)); return; }
-    fetch('audio/music/' + name + '.mp3')
-      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); })
+    trackBytes(name)
       .then(b => ctx.decodeAudioData(b))
       .then((buf) => { const lb = makeLoop(buf, A.MUSIC_LOOPS[name]); if (name === 'menu') loopCache.set(name, lb); go(lb); })
       .catch((e) => {
@@ -382,7 +398,7 @@
     A.stopMusic();
     if (!name) return;
     musicName = name;
-    if (loop && A.MUSIC_LOOPS[name] && ctx && canFetch()) startLoop(name);
+    if (loop && A.MUSIC_LOOPS[name] && ctx) startLoop(name);
     else elementMusic(name, loop);
   };
   A.stopMusic = function () {

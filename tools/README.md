@@ -18,6 +18,9 @@ pycdlib, plus ffmpeg.
    * `python build_campaigns.py ../extracted/DATA/RES ../web` converts the campaign stages (`*.CAM`).
    * `python build_classic.py ../web` draws the Classic arena (`data/classic.js`, `img/field11.png`).
      `python make_chiptune.py classic.wav` writes its music; encode that to `audio/music/classic.mp3`.
+   * `python tools/build_music_loops.py` (from the repository root) writes `audio/music/<name>.js`
+     for the seamlessly looped tracks, so they loop from disk (file://) too; `--measure` (ffmpeg,
+     numpy, scipy) prints where each track's opening comes round again (`AB.audio.MUSIC_LOOPS`).
    * `python build_menu_image.py ../web/img/mainmenu.png ../web/img/mainmenu_port.png` relabels
      the main menu ("Campaign Mode", "Network Game") using letters cut from the picture itself.
    * The intro: `INTRO/BMINTRO.EXE` on the CD has an Interplay MVE movie starting at byte 52850.
