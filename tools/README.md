@@ -42,6 +42,12 @@ About the voice files:
 
 To inspect the files:
 
+* `node tools/build_favicon.cjs` exports `output/favicon/green-bomberman-master.png` into the
+  green PNG favicons, a 16/32/48 px ICO, and the 180/192/512 px home-screen icons. It requires
+  `sharp` and `@napi-rs/canvas` on Node's module path. The master was generated with the built-in
+  imagegen tool from the game's title/victory artwork; its prompt and a light/dark preview at
+  actual tab sizes are in `output/favicon/`. Transparency is preserved in all icon sizes.
+
 * `node tools/test_tilesets.cjs` (from the repository root, with `@napi-rs/canvas` available to
   Node) checks that the original arenas still draw exactly as with the renderer in commit
   `c77e4b4`, that drawing Bedrock never changes the simulation, that Bedrock is in the Arenas list

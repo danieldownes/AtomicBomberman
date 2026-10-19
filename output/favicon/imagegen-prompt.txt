@@ -1,0 +1,15 @@
+Generated with the built-in imagegen tool, using title.png, victory4.png and the existing white icon as references.
+
+Use case: logo-brand.
+Asset type: production favicon master for the Atomic Bomberman browser game.
+Primary request: generate a fresh, faithful GREEN Atomic Bomberman head icon using the project's own 1997 artwork as character reference. This will be reduced to 16x16 and 32x32 browser tabs, so prioritize a bold clear silhouette and very simple readable features.
+
+Reference image 1 (title.png): character identity and green helmet, face visor and antenna.
+Reference image 2 (victory4.png): the same green character's helmet and materials.
+Reference image 3 (current icon-512.png): close-up head-only framing and clear two black eyes; improve this with the green character's color.
+These are reference images, not edit targets. Do not reproduce their text, backgrounds or whole compositions.
+
+Create ONE centered head icon on a genuinely transparent background. Square 1024x1024 composition. Only the helmeted head, very short chin/collar rim, and one short antenna with green ball. No body, shoulders, hands, weapons, bombs or accessories. Fill about 90% of the square vertically and 88% horizontally; antenna should be short enough to let the face stay large.
+Faithful Atomic Bomberman features: round emerald/lime green metallic helmet, broad light ivory-white face visor, TWO large tall narrow solid black rectangular eyes, no mouth, no nose, green lower helmet rim and restrained dark side hardware. Antenna originates at the crown and ends in one green sphere. The helmet is the GREEN equipment color in the existing title and victory art, not the silver/white player.
+Style: polished simplified 1990s pre-rendered arcade mascot, smooth bold shapes with restrained highlights from upper left and deep green edge shading. Keep a tiny light edge on the silhouette for dark browser tabs. Very sparse mechanical detail, no fine wires, no tiny seams. Nearly front-facing, confident symmetrical silhouette with a subtle three-quarter light treatment. Crisp edges. Strong recognizable emerald green silhouette, bright pale visor, black eyes. The eyes and visor must still read clearly at tiny favicon scale.
+Constraints: truly transparent surroundings; no solid background, no checkerboard artwork, no app-tile square or circular badge, no glow cloud, no cast shadow outside the head, no text, no lettering, no watermark, no decorative ring. One head, one antenna. Do not copy the word ATOMIC or VICTORY or any background from the references.

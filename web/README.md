@@ -223,9 +223,9 @@ data/fonts.js       FONT0/1/6.FON
 data/titlefont.js   the Anton font (OFL, licence in data/titlefont.LICENSE.txt) for arena names and the countdown
 img/                every .PCX picture as PNG, mainmenu_port.png (relabelled menu), field11.png (Classic)
 img/tilesets/       terrain textures for the Bedrock arena (new generated pixel art)
-img/icons/, favicon.ico, manifest.webmanifest   the site icon: the white bomberman's head from the
-                    game's own sprite (16-48 px for tabs, 180 px for iPhones/iPads, 192/512 px for
-                    "add to home screen")
+img/icons/green-*, favicon-green.ico, manifest.webmanifest   the site icon: a generated green
+                    bomberman's head based on the original title and victory artwork (16-48 px
+                    for tabs, 180 px for iPhones/iPads, 192/512 px for "add to home screen")
 audio/music/        the 17 music tracks, plus classic.mp3 (new)
 audio/clips/        all 2,010 sound clips from the CD, one small script each, loaded when needed
 intro/              the CD's intro movie, re-encoded (WebM, with MP4 as a fallback)
