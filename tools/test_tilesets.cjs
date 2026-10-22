@@ -14,6 +14,8 @@ const output = path.join(root, 'output', 'tilesets');
 // draw exactly as they did then
 const originalRendererCommit = 'c77e4b4e5a515795b067bc3355ad98beb2ed50f3';
 const hash = canvas => crypto.createHash('sha256').update(canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data).digest('hex');
+// the arena only: below the status bar (y 48 on), whose player names and scores are drawn differently now
+const arenaHash = canvas => crypto.createHash('sha256').update(canvas.getContext('2d').getImageData(0, 48, canvas.width, canvas.height - 48).data).digest('hex');
 const source = file => fs.readFileSync(path.join(web, file), 'utf8');
 
 async function environment(saved = {}) {
@@ -116,7 +118,7 @@ function save(name, canvas) { fs.writeFileSync(path.join(output, name), canvas.t
       const g = game(A, level);
       for (const remaining of [0, 30, 18, 3]) {
         for (let i = 0; i < g.tiles.length; i++) if (g.tiles[i] === 2) { g.brickT[i] = remaining; break; }
-        assert.equal(hash(picture(currentDraw, g)), hash(picture(originalDraw, g)), `Original arena ${level} changed at brick timer ${remaining}`);
+        assert.equal(arenaHash(picture(currentDraw, g)), arenaHash(picture(originalDraw, g)), `Original arena ${level} changed at brick timer ${remaining}`);
       }
     }
     console.log(`PASS: all ${BR} original arenas match the previous renderer.`);

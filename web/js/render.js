@@ -208,23 +208,76 @@
   }
 
   // ---- top status bar: per-player score/kills (VALUELST 113-119), timer at #110/#111 ----
+  // a player's name (network and typed names; otherwise "Player 3" / "AI 3"), for the status bar and
+  // the name tags (js/screens.js)
+  Rn.playerName = function (g, p) {
+    const M = g.cfg && g.cfg.match, mp = M && M.players && M.players.find(q => q.slot === p.slot);
+    if (mp && mp.name && (M.net || mp.custom)) return mp.name;
+    return p.isAI ? 'AI ' + (p.slot + 1) : AB.msg(33, 'Player %u').replace('%u', p.slot + 1);
+  };
+  // a player's head (from the standing sprite: antenna to visor, 52..10 px above where it's drawn
+  // from), in a square `size` px across with its middle at (cx, cy)
+  function drawHead(ctx, p, cx, cy, size) {
+    const k = size / 42;
+    ctx.save(); ctx.beginPath(); ctx.rect(cx - 21 * k, cy - 21 * k, 42 * k, 42 * k); ctx.clip();
+    ctx.translate(cx - 2 * k, cy + 31 * k); ctx.scale(k, k);
+    G.draw(ctx, 'stand south', 0, 0, 0, p.color, true);
+    ctx.restore();
+  }
+  const fitName = (t, w) => { if (G.textWidth(t, 'font0') <= w) return t; while (t.length > 1 && G.textWidth(t + '..', 'font0') > w) t = t.slice(0, -1); return t + '..'; };
+  // the status bar (the dark panel left of the timer): each player's head, name and score (S: rounds
+  // won, K: kills), as big as fits. The players are laid out in one or two rows, the name beside the
+  // score or above it, whichever lets them be drawn largest (up to twice size). A dead player's head
+  // and name are crossed out.
+  const BAR = { x: 8, y: 6, w: 510, h: 40 }, LINE = 14;      // LINE: font0's line at full size
   function drawHud(ctx, g, t) {
-    const xs = [AB.val(115, 10), AB.val(116, 110), AB.val(117, 210), AB.val(118, 310), AB.val(119, 410)];
-    const ys = [AB.val(113, 6), AB.val(114, 26)];
-    const match = g.cfg.match || { wins: {} };
-    g.players.forEach((p, i) => {
-      const x = xs[i % 5], y = ys[(i / 5) | 0];
-      const css = AB.PLAYER_CSS[p.color];
-      ctx.globalAlpha = p.alive ? 1 : 0.45;
-      // tiny bomberman head in the player's colour
-      ctx.save(); ctx.beginPath(); ctx.rect(x - 4, y - 2, 22, 19); ctx.clip();
-      ctx.translate(x + 7, y + 25); ctx.scale(0.5, 0.5);
-      G.draw(ctx, 'stand south', 0, 0, 0, p.color, true);
-      ctx.restore();
+    const match = g.cfg.match || { wins: {} }, hd = !!(AB.hd && AB.hd.active()), n = g.players.length;
+    const tw = (str) => G.textWidth(str, 'font0');
+    const rows0 = g.players.map(p => {
       const wins = (match.wins && match.wins[p.slot]) || 0;
       const kills = (match.kills && match.kills[p.slot] !== undefined ? match.kills[p.slot] : 0) + p.kills;
-      G.text(ctx, `S:${wins} K:${kills}`, x + 16, y, p.color === 1 ? '#a0a0a0' : css, 'font0');
+      return { p, name: Rn.playerName(g, p), stats: `S:${wins} K:${kills}` };
+    });
+    const nameW = Math.min(96, Math.max(0, ...rows0.map(e => tw(e.name)))), statW = Math.max(tw('S:9 K:99'), ...rows0.map(e => tw(e.stats)));
+    let L = null;
+    for (const rows of n > 1 ? [1, 2] : [1]) {
+      const cols = Math.ceil(n / rows), cw = BAR.w / cols, ch = BAR.h / rows;
+      for (const stacked of [false, true]) {
+        const icon = (stacked ? 2 : 1) * LINE * 1.15;
+        const needW = icon + 4 + (stacked ? Math.max(nameW, statW) : nameW + 6 + statW) + 4, needH = (stacked ? 2 : 1) * LINE + 2;
+        const sc = Math.min(cw / needW, ch / needH, 2);
+        if (!L || sc > L.s + 0.01) L = { cols, cw, ch, stacked, s: sc };
+      }
+    }
+    if (!L) return;
+    // text in the original bitmap font stays sharp at full or double size; HD's outline font scales freely
+    const ts = hd ? L.s : L.s >= 2 ? 2 : 1;
+    rows0.forEach((e, i) => {
+      const p = e.p, x0 = BAR.x + (i % L.cols) * L.cw, cy = BAR.y + Math.floor(i / L.cols) * L.ch + L.ch / 2;
+      const iconH = (L.stacked ? 2 : 1) * LINE * L.s * 1.15, iconW = iconH, tx = x0 + iconW + 4 * L.s;
+      const col = p.color === 1 ? '#a0a0a0' : AB.PLAYER_CSS[p.color];
+      const room = (L.cw - (tx - x0) - 4) / ts - (L.stacked ? 0 : 6 + tw(e.stats));
+      const name = fitName(e.name, Math.max(12, room));
+      const ny = L.stacked ? cy - LINE * ts / 2 : cy, sy = L.stacked ? cy + LINE * ts / 2 : cy;
+      const sx = L.stacked ? tx : tx + (tw(name) + 6) * ts;
+      ctx.globalAlpha = p.alive ? 1 : 0.5;
+      drawHead(ctx, p, x0 + iconW / 2, cy, iconH);
+      const say = (str, x, y, c) => { ctx.save(); ctx.translate(x, y - 7 * ts); ctx.scale(ts, ts); G.text(ctx, str, 0, 0, c, 'font0'); ctx.restore(); };
+      say(name, tx, ny, col);
+      say(e.stats, sx, sy, '#d0d0d0');
       ctx.globalAlpha = 1;
+      if (!p.alive) {
+        // crossed out: an X over the head, a line through the name
+        ctx.save(); ctx.lineCap = 'round';
+        const ix = x0 + iconW / 2, d = iconH * 0.42, line = (x1, y1, x2, y2, w) => {
+          ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.lineWidth = w + 2; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+          ctx.strokeStyle = '#f03028'; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+        };
+        const w = Math.max(1.5, 2 * L.s);
+        line(ix - d, cy - d, ix + d, cy + d, w); line(ix + d, cy - d, ix - d, cy + d, w);
+        line(tx - 1, ny, tx + tw(name) * ts + 1, ny, Math.max(1.2, 1.4 * ts));
+        ctx.restore();
+      }
     });
     // timer
     const tx = AB.val(110, 525), ty = AB.val(111, 36), sp = AB.val(112, 4);

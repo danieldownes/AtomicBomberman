@@ -25,7 +25,8 @@ pycdlib, plus ffmpeg. The victory-art build also needs Node.js with `sharp` avai
      numpy, scipy) prints where each track's opening comes round again (`AB.audio.MUSIC_LOOPS`).
    * `python build_ui_fonts.py` (from the repository root; Pillow, numpy and fontTools required)
      embeds the vendored Amarante menu font, removes the old lettering from the Retro menu
-     background, and builds outline versions of the three original bitmap UI fonts for HD.
+     background, and embeds the vendored Chakra Petch (600 and 700, Latin, from
+     `@fontsource/chakra-petch`) as `data/uifont.js`, HD mode's text font.
      Menu labels and their actions live together in `web/js/screens.js`.
    * The intro: `INTRO/BMINTRO.EXE` on the CD has an Interplay MVE movie starting at byte 52850.
      Cut it out and re-encode it with ffmpeg:

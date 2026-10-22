@@ -654,7 +654,7 @@
       else if (e.t === 'taunt') setTimeout(() => A.playRange(700, 999, 1, key), 500);
       else if (e.t === 'death') { if (340 + e.anim <= 349) A.play(340 + e.anim); }
     },
-    // during the countdown and for a second after it: who is who, over each bomberman (a stripe in their colour)
+    // during the countdown and for a second after it: who is who, at each bomberman's feet
     drawNameTags(ctx) {
       const g = this.g, M = AB.match;
       if (!M || M.demo) return;
@@ -664,16 +664,42 @@
       ctx.save(); ctx.globalAlpha = a;
       for (const p of g.players) {
         if (!p.alive) continue;
-        const mp = M.players.find(q => q.slot === p.slot);
-        const name = M.net && mp && mp.name ? mp.name
-          : mp && mp.custom ? mp.name : p.isAI ? 'AI ' + (p.slot + 1) : AB.msg(33, 'Player %u').replace('%u', p.slot + 1);
+        const name = AB.render.playerName(g, p);
         const w = Math.min(G.textWidth(name, 'font0'), 140) + 10;
-        const x = AB.clamp(Math.round(p.x), w / 2 + 2, 638 - w / 2), y = Math.max(46, Math.round(p.y) - 62);
+        const x = AB.clamp(Math.round(p.x), w / 2 + 2, 638 - w / 2), y = Math.min(AB.H - 14, Math.round(p.y) + 20);
         ctx.fillStyle = 'rgba(0,0,0,0.72)'; ctx.fillRect(x - w / 2, y - 2, w, 14);
-        ctx.fillStyle = PCOL[p.color % 10]; ctx.fillRect(x - w / 2, y + 11, w, 2);
         G.text(ctx, fitTo(name, 140), x, y, WHITE, 'font0', 1);
       }
       ctx.restore();
+    },
+    // round start: the scheme's name and a 3, 2, 1 countdown. They are drawn on a layer of their own
+    // with an oval around each human player's bomberman faded out of it, so nobody loses sight of
+    // themselves behind the big numbers.
+    drawCountdown(ctx) {
+      const g = this.g, n = Math.ceil(g.startDelay / AB.TPS), frac = ((g.startDelay - 1) % AB.TPS + 1) / AB.TPS;    // 1 -> 0 over each number
+      const W = ctx.canvas.width, H = ctx.canvas.height, k = W / AB.W;
+      let L = this.cdLayer;
+      if (!L || L.width !== W || L.height !== H) { L = this.cdLayer = document.createElement('canvas'); L.width = W; L.height = H; }
+      const lx = L.getContext('2d');
+      lx.setTransform(1, 0, 0, 1, 0, 0); lx.clearRect(0, 0, W, H);
+      lx.setTransform(k, 0, 0, k, 0, 0); lx.imageSmoothingEnabled = ctx.imageSmoothingEnabled;
+      // each number starts as tall as the screen and shrinks about the middle, fading at the end
+      const p = 1 - frac, e = 1 - Math.pow(1 - p, 3);
+      G.titleTextMid(lx, String(n), 320, 240, 480 - 330 * e, p > 0.75 ? Math.max(0, (1 - p) / 0.25) : 1);
+      G.titleText(lx, g.scheme && g.scheme.name || '', 320, 200, 52, 560);
+      lx.globalCompositeOperation = 'destination-out';
+      for (const q of g.players) {
+        if (!q.alive || q.isAI) continue;
+        // the bomberman stands with his feet 17 px below p.y and is about 60 px tall
+        const rx = 34, ry = 50;
+        lx.save(); lx.translate(q.x, q.y - 12); lx.scale(1, ry / rx);
+        const gr = lx.createRadialGradient(0, 0, 0, 0, 0, rx);
+        gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(0.62, 'rgba(0,0,0,0.95)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+        lx.fillStyle = gr; lx.beginPath(); lx.arc(0, 0, rx, 0, Math.PI * 2); lx.fill();
+        lx.restore();
+      }
+      lx.globalCompositeOperation = 'source-over';
+      ctx.drawImage(L, 0, 0, AB.W, AB.H);
     },
     // voice chat: a speaker over the bombermen of a computer while it speaks
     drawTalk(ctx) {
@@ -746,13 +772,7 @@
       }
       if (M && M.demo && blink()) { panel(ctx, 230, 450, 180, 24, 0.7); centerText(ctx, 'DEMO - press any key', 454, YELLOW, 'font0'); }
       // round start: the scheme's name and a 3, 2, 1 countdown (then who is who, on top)
-      if (this.g.startDelay > 0) {
-        const g = this.g, n = Math.ceil(g.startDelay / AB.TPS), frac = ((g.startDelay - 1) % AB.TPS + 1) / AB.TPS;    // 1 -> 0 over each number
-        // each number starts as tall as the screen and shrinks about the middle, fading at the end
-        const p = 1 - frac, e = 1 - Math.pow(1 - p, 3);
-        G.titleTextMid(ctx, String(n), 320, 240, 480 - 330 * e, p > 0.75 ? Math.max(0, (1 - p) / 0.25) : 1);
-        G.titleText(ctx, g.scheme && g.scheme.name || '', 320, 200, 52, 560);
-      }
+      if (this.g.startDelay > 0) this.drawCountdown(ctx);
       this.drawNameTags(ctx);
       if (this.session && this.showNet) {
         const st = AB.netmatch.statsLines(this.netStats);

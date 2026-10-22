@@ -37,8 +37,9 @@ and several deaths still use the original sprites because their generated poses 
 HD flames are cut from connected blast artwork to keep their segment joins continuous.
 HD draws its
 bombs from the biggest bomb frame, scaled and leaned like the original animation. The intro movie and real people in the credits retain their original assets.
-Main-menu lettering uses the bundled Amarante outline font; Retro retains the original
-bitmap fonts elsewhere.
+Main-menu lettering uses the bundled Amarante outline font. Elsewhere HD writes in Chakra
+Petch (bundled, OFL), whose cut corners echo the original bitmap fonts, sized to match them;
+Retro keeps the bitmap fonts.
 
 ### Default controls (from the original INPUT.BM; change them under Options > Define keyboard layouts)
 
@@ -226,12 +227,16 @@ These are under main menu > Options, next to the original settings.
 * **Round Start Countdown** (on by default): each round opens with the name of its scheme (the
   layout, e.g. "Just the BASIC SET! (10)") and a 3, 2, 1 countdown before anyone can move: each
   number starts screen-high and shrinks away, with a wall slam, and an explosion on "go". The
-  round's music starts after it. During the countdown and for a second after, every bomberman
-  has a name tag ("Player 1", "AI 3", or the player's own name in network games). The loading
-  screen shows the scheme's name too.
+  round's music starts after it. The numbers fade out in an oval around each human player's
+  bomberman, so nobody loses sight of themselves. During the countdown and for a second after,
+  every bomberman has a name tag at its feet ("Player 1", "AI 3", or the player's own name). The
+  loading screen shows the scheme's name too.
+* **Status bar**: each player's head, name and score (S: rounds won, K: kills), laid out in one or
+  two rows and sized to fill the bar, whether there are 2 players or 10. A player who is out is
+  crossed out.
 * **Only computer players left** (local and network games, not campaigns): once every human player
   is out and at least two computer players remain, HURRY sounds, and 3 seconds later the walls
-  close in four times as fast and fill the arena. An AI that wins by knocking out the last human
+  close in four times as fast and fill the arena (at once, if they are already closing in). An AI that wins by knocking out the last human
   just wins.
   * The lettering copies the style of the original's HURRY!! picture. The CD has no letters in that
     style, so it uses Anton, a free font (SIL Open Font License) embedded in `data/titlefont.js`.
@@ -268,6 +273,7 @@ data/campaigns.js   the campaign stages from DATA/RES/*.CAM
 data/sounds.js      sound catalog: game events -> phrases -> takes, with flags for each take
 data/fonts.js       FONT0/1/6.FON
 data/titlefont.js   the Anton font (OFL, licence in data/titlefont.LICENSE.txt) for arena names and the countdown
+data/uifont.js      the Chakra Petch font (OFL, data/ui-chakra-petch.*) for HD mode's text
 img/                every .PCX picture as PNG, mainmenu_port.png (relabelled menu), field11.png (Classic)
 img/tilesets/       terrain textures for the Bedrock arena (new generated pixel art)
 img/victory-base.png, victory-mask.png   the shared original win scene and its material/palette map

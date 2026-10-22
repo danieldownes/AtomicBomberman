@@ -345,15 +345,45 @@
     try { const face = new FontFace('ABMenuClean', window.AB_MENUFONT ? fontBytes(window.AB_MENUFONT) : 'url(data/menu-amarante.ttf)'); await face.load(); document.fonts.add(face); }
     catch (e) { console.warn('Menu font:', e.message); }
   };
-  let hdFontsReady = false;
-  gfx.loadHDFonts = async function () {
-    if (hdFontsReady || !window.FontFace) return;
-    const faces = await Promise.all(['font0','font1','font6'].map(async name => {
-      const encoded = window.AB_HD_MANIFEST && window.AB_HD_MANIFEST.fonts && window.AB_HD_MANIFEST.fonts[name];
-      const face = new FontFace('ABHD' + name, encoded ? fontBytes(encoded) : 'url(hd/fonts/' + name + '.ttf)'); await face.load(); return face;
-    }));
-    faces.forEach(face => document.fonts.add(face)); hdFontsReady = true;
+  // ---- HD's text: Chakra Petch (SIL OFL, data/uifont.js, built by tools/build_ui_fonts.py) ----
+  // A real outline font instead of the bitmap fonts' letters scaled up; its cut corners echo theirs.
+  // Each bitmap font maps to a weight, size and slight squeeze that keep a line about as tall and as
+  // wide as before: font0 (small) with its lowercase as tall as the original's, font1/font6 with
+  // their capitals as tall. Text sits on the original baseline (13 px below the top) and, while HD is
+  // on, is measured in this font too (gfx.textWidth), so centring and fitting stay exact.
+  const HD_FONT = { font0: { w: 600, px: 14, sx: 0.93 }, font1: { w: 700, px: 17, sx: 1 }, font6: { w: 700, px: 17, sx: 1 } };
+  let hdFontsReady = false, hdFontsLoading = null;
+  gfx.loadHDFonts = function () {
+    if (hdFontsReady || !window.FontFace) return Promise.resolve();
+    if (hdFontsLoading) return hdFontsLoading;
+    hdFontsLoading = (async () => {
+      if (!window.AB_UIFONT) await new Promise((resolve, reject) => {
+        const v = (window.AB_VERSION || {}).commit || '', s = document.createElement('script');
+        s.src = 'data/uifont.js' + (/^[0-9a-f]{7,40}$/.test(v) ? '?v=' + v : '');
+        s.onload = resolve; s.onerror = () => reject(new Error('HD font could not be loaded'));
+        document.body.appendChild(s);
+      });
+      const faces = await Promise.all(Object.entries(window.AB_UIFONT).map(async ([w, b64]) => {
+        const face = new FontFace('ABUI', fontBytes(b64), { weight: w }); await face.load(); return face;
+      }));
+      faces.forEach(face => document.fonts.add(face)); hdFontsReady = true;
+    })().finally(() => { hdFontsLoading = null; });
+    return hdFontsLoading;
   };
+  const hdText = () => hdFontsReady && AB.hd && AB.hd.active();
+  const hdFont = (font) => HD_FONT[font] || HD_FONT.font1;
+  let measure = null; const hdWidths = new Map();
+  function hdWidth(text, font) {
+    const key = font + '\n' + text; let w = hdWidths.get(key);
+    if (w === undefined) {
+      if (!measure) measure = document.createElement('canvas').getContext('2d');
+      const f = hdFont(font); measure.font = f.w + ' ' + f.px + 'px ABUI';
+      w = measure.measureText(text).width * f.sx;
+      if (hdWidths.size > 4000) hdWidths.clear();
+      hdWidths.set(key, w);
+    }
+    return w;
+  }
   gfx.menuText = function (ctx, text, x, y, maxW = 268, selected = false) {
     ctx.save(); ctx.font = '32px ABMenuClean, serif'; ctx.textBaseline = 'alphabetic';
     const width = ctx.measureText(text).width, scale = Math.min(1, maxW / Math.max(1, width));
@@ -454,6 +484,7 @@
   // FONT0 glyph widths are tight (no built-in spacing); FONT1/FONT6 include a blank column
   const SPACING = { font0: 1, font1: 0, font6: 0 };
   gfx.textWidth = function (text, font = 'font1') {
+    if (hdText()) return hdWidth(String(text), font);
     const fd = F[font]; let w = 0; const sp = SPACING[font] || 0;
     for (const ch of String(text)) { const g = fd.g[ch.charCodeAt(0)]; w += (g ? g[0] : 6) + sp; }
     return w;
@@ -467,9 +498,11 @@
     drawText(ctx, text, x, y, color, font);
   };
   function drawText(ctx, text, x, y, color, font) {
-    if (hdFontsReady && AB.hd && AB.hd.active()) {
-      ctx.save(); ctx.font = F[font].h + 'px ABHD' + font; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
-      ctx.fontKerning = 'none'; ctx.fillStyle = color; ctx.fillText(text,x,y); ctx.restore(); return;
+    if (hdText()) {
+      const f = hdFont(font);
+      ctx.save(); ctx.font = f.w + ' ' + f.px + 'px ABUI'; ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left'; ctx.fillStyle = color;
+      ctx.translate(x, y + 13); if (f.sx !== 1) ctx.scale(f.sx, 1);
+      ctx.fillText(text, 0, 0); ctx.restore(); return;
     }
     const sh = fontSheet(font, color); const sp = SPACING[font] || 0;
     for (const ch of text) {

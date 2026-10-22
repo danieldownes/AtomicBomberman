@@ -176,8 +176,8 @@ async function manifest() {
       images[name]={src:'hd/img/'+name+'.webp',width,height,scale:SCALE,bytes:fs.statSync(file).size};
     }
   }
-  const fonts={};for(const name of ['font0','font1','font6']){const file=path.join(dest,'fonts',name+'.ttf');if(fs.existsSync(file))fonts[name]=fs.readFileSync(file).toString('base64');}
-  const result = { version: 1, scale: SCALE, images, atlases, fonts, original: ORIGINAL };
+  // (HD text uses Chakra Petch, data/uifont.js: no fonts in the pack)
+  const result = { version: 1, scale: SCALE, images, atlases, original: ORIGINAL };
   fs.writeFileSync(path.join(dest, 'manifest.js'), 'window.AB_HD_MANIFEST=' + JSON.stringify(result) + ';\n');
   console.log('HD: ' + Object.keys(atlases).length + '/' + Object.keys(sprites).length + ' atlases, ' + Object.keys(images).length + ' images');
   // the recoloured pictures again as scripts, for opening the game from disk (file://)
