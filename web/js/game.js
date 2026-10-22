@@ -174,7 +174,7 @@
         dis: new Array(AB.DIS_COUNT).fill(false), disT: 0, disFresh: 0,
         special: 0, specialT: 0,            // 1 kick, 2 punch, 3 stunned, 4 pickup, 5 trampoline, 6 warp-out, 7 warp-in, 20+ cornerhead
         cornerN: 0, held: -1, stunT: 0,
-        prevIn: 0, inBits: 0,
+        prevIn: 0, inBits: 0, poopsGrabAt: 0,
         idleT: 0, idleN: pc.slot | 0,       // standing-still timer for the idle animations (cosmetic)
         kills: 0, awesomeCount: 0, tramp: null, warp: null,
         warpLock: -1,                       // the warp just arrived at: it can't send you on until you've left its tile
@@ -378,7 +378,11 @@
         if (!b || b.dead) p.held = -1;
         else {
           b.x = p.x; b.y = p.y;
-          if (poops || !bombDown) { this.throwBomb(p, b); p.held = -1; }
+          if (poops || !bombDown) {
+            this.throwBomb(p, b); p.held = -1;
+            // poops threw it: the pickup pose ends, so the player can walk until the next pickup
+            if (poops && p.special === 4) { p.special = 0; p.specialT = 0; p.poopsGrabAt = this.tick + K.PICKUP_PAUSE; }
+          }
         }
       }
       // ---- action button ----
@@ -395,10 +399,9 @@
       if (bombDown && (!bombWas || poops) && !p.dis[DIS.CONSTIPATION] && p.held < 0) {
         const pcx = AB.cellX(p.x), pcy = AB.cellY(p.y);
         const here = this.bombAtCell(pcx, pcy);
-        // the glove picks a bomb up only when the button is really pressed: the presses poops makes
-        // would pick up every bomb it drops, and the pickup pose (no walking) would never end
-        const pressed = !!(p.inBits & AB.IN.BOMB) && !bombWas;
-        if (here && here.owner === p.slot && p.pw[PW.GRAB] && pressed) {
+        // with poops the glove keeps picking up the bomb poops drops, and throwing it (as the original
+        // does), but each throw is followed by one pickup pause (#665) of walking before the next pickup
+        if (here && here.owner === p.slot && p.pw[PW.GRAB] && !bombWas && !(poops && this.tick < p.poopsGrabAt)) {
           // pick up our bomb
           here.motion = 3; here.holder = p.slot; this.bombAt[idx(here.cx, here.cy)] = -1;
           p.held = here.i; p.special = 4; p.specialT = 0;
