@@ -75,6 +75,13 @@
   // ---------------------------------------------------------------- helpers
   const isOK = (k) => k.code === 'Enter' || k.code === 'Space' || k.code === 'NumpadEnter';
   const isBack = (k) => k.code === 'Escape' || k.code === 'Backspace';
+  // "press bomb": Enter/Space, or the bomb key of a keyboard layout a player in the match uses
+  // (Options > Define keyboard layouts), so each player's own bomb key works too
+  const isBomb = (k) => {
+    if (isOK(k)) return true;
+    const L = AB.input && AB.input.layouts, used = AB.match && AB.match.players ? AB.match.players.map(p => /^key\d$/.test(p.control || '') ? +p.control.slice(3) : -1).filter(n => n >= 0) : [];
+    return !!L && (used.length ? used : L.map((_, n) => n)).some(n => L[n] && L[n].bomb === k.code);
+  };
   function panel(ctx, x, y, w, h, a = 0.62) {
     ctx.fillStyle = `rgba(0,0,16,${a})`; ctx.fillRect(x, y, w, h);
     ctx.strokeStyle = 'rgba(248,216,72,0.55)'; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
@@ -135,7 +142,7 @@
   function blink() { return (frame >> 4) % 2 === 0; }
   // shared with the screens in js/screens2.js
   SC.uiLate = () => ({ arenaPreview, arenaSummary, startMatch, nextRound, activeSetup, controlOptions, controlLabel });
-  SC.ui = { YELLOW, WHITE, GREY, ORANGE, CYAN, isOK: (k) => isOK(k), isBack: (k) => isBack(k), panel, glue, glueDim, menuCursor, f1Hint,
+  SC.ui = { YELLOW, WHITE, GREY, ORANGE, CYAN, isOK: (k) => isOK(k), isBack: (k) => isBack(k), isBomb: (k) => isBomb(k), panel, glue, glueDim, menuCursor, f1Hint,
             centerText, drawTick, blink, miniHead, miniBomber, fmtTime, frame: () => frame };
 
   // ================================================================= INTRO MOVIE
@@ -824,16 +831,16 @@
           const n = NM.NUDGE_SOUNDS.length;
           if (k.code === 'ArrowUp') { this.pick = (this.pick + n - 1) % n; A.play(20); }
           else if (k.code === 'ArrowDown') { this.pick = (this.pick + 1) % n; A.play(21); }
-          else if (isOK(k)) NM.nudge(this.pick);
+          else if (isBomb(k)) NM.nudge(this.pick);
           else if (isBack(k)) this.pick = null;
           return;
         }
         if (isBack(k) && k.pad === undefined && !host) { NM.quit(); return; }
-        if ((isOK(k) || isBack(k)) && host) NM.hostContinue(this.winner);
-        else if (isOK(k) && NM.nudge() >= 3) this.pick = 0;      // only the host moves on: say so
+        if ((isBomb(k) || isBack(k)) && host) NM.hostContinue(this.winner);
+        else if (isBomb(k) && NM.nudge() >= 3) this.pick = 0;      // only the host moves on: say so
         return;
       }
-      if (isOK(k) || isBack(k)) {
+      if (isBomb(k) || isBack(k)) {
         if (isBack(k) && !this.winner && k.pad === undefined) { AB.match = null; SC.go('mainmenu'); return; }
         if (this.winner) SC.go('victory', this.winner); else nextRound();
       }
@@ -910,11 +917,11 @@
     key(k) {
       if (this.t < 40) return;
       if (AB.match && AB.match.net) {
-        if (AB.netplay.isHost() && (isOK(k) || isBack(k))) AB.netmatch.hostEnd();
+        if (AB.netplay.isHost() && (isBomb(k) || isBack(k))) AB.netmatch.hostEnd();
         else if (isBack(k) && k.pad === undefined) AB.netmatch.quit();
         return;
       }
-      if (isOK(k) || isBack(k)) {
+      if (isBomb(k) || isBack(k)) {
         if (MS().goldBomberman && !AB.match.demo) SC.go('roulette', this.w);
         else { AB.match = null; SC.go('players'); }
       }

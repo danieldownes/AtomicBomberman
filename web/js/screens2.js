@@ -292,7 +292,7 @@
     key(k) {
       if (this.t < 30) return;
       if (U.isBack(k) && k.pad === undefined) { AB.match = null; SC.go('campaign'); }
-      else if (U.isOK(k) || k.pad !== undefined) SC.go('campstage');
+      else if (U.isBomb(k) || k.pad !== undefined) SC.go('campstage');
     },
     tick() { this.t++; },
     render(ctx) {

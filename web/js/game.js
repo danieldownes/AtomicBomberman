@@ -1021,6 +1021,8 @@
       if (this.finaleT === undefined) {
         if (!this.players.some(p => !p.isAI) || this.players.some(p => p.alive && !p.isAI)) return;
         if (this.players.filter(p => p.alive).length < 2) return;
+        // walls already closing in: no warning needed, they speed up at once
+        if (this.enc && !this.enc.done) { this.finaleT = 0; this.enc.depth = 99; this.enc.fast = true; this.hurryShown = 2 * AB.TPS; return; }
         this.finaleT = 3 * AB.TPS;
         if (!this.hurry) { this.hurry = true; this.snd(2700, 2799); this.ev({ t: 'hurry' }); }
         this.hurryShown = 3 * AB.TPS;
