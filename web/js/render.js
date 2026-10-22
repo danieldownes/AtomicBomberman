@@ -52,6 +52,9 @@
     const smooth = ctx.imageSmoothingEnabled;
     if (classic) ctx.imageSmoothingEnabled = false;
     AB.tilesets.drawField(ctx, lvl);
+    // the status bar's own panel, under the sprites: flush with the top and sides, half see-through
+    // (the arenas' pictures each have a black panel of a different size there)
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, AB.W, BAR_H);
     // floor extras
     for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
       const e = g.extras[idx(x, y)];
@@ -229,7 +232,8 @@
   // won, K: kills), as big as fits. The players are laid out in one or two rows, the name beside the
   // score or above it, whichever lets them be drawn largest (up to twice size). A dead player's head
   // and name are crossed out.
-  const BAR = { x: 8, y: 6, w: 510, h: 40 }, LINE = 14;      // LINE: font0's line at full size
+  const BAR_H = 48, BAR = { x: 6, y: 3, w: 516, h: 42 }, LINE = 14;      // LINE: font0's line at full size
+  const OUTLINED = new Set([1, 3, 9]);      // black, blue and purple names get a light outline, to read on black
   function drawHud(ctx, g, t) {
     const match = g.cfg.match || { wins: {} }, hd = !!(AB.hd && AB.hd.active()), n = g.players.length;
     const tw = (str) => G.textWidth(str, 'font0');
@@ -255,15 +259,22 @@
     rows0.forEach((e, i) => {
       const p = e.p, x0 = BAR.x + (i % L.cols) * L.cw, cy = BAR.y + Math.floor(i / L.cols) * L.ch + L.ch / 2;
       const iconH = (L.stacked ? 2 : 1) * LINE * L.s * 1.15, iconW = iconH, tx = x0 + iconW + 4 * L.s;
-      const col = p.color === 1 ? '#a0a0a0' : AB.PLAYER_CSS[p.color];
+      const col = AB.PLAYER_CSS[p.color], outlined = OUTLINED.has(p.color);
       const room = (L.cw - (tx - x0) - 4) / ts - (L.stacked ? 0 : 6 + tw(e.stats));
       const name = fitName(e.name, Math.max(12, room));
       const ny = L.stacked ? cy - LINE * ts / 2 : cy, sy = L.stacked ? cy + LINE * ts / 2 : cy;
       const sx = L.stacked ? tx : tx + (tw(name) + 6) * ts;
       ctx.globalAlpha = p.alive ? 1 : 0.5;
       drawHead(ctx, p, x0 + iconW / 2, cy, iconH);
-      const say = (str, x, y, c) => { ctx.save(); ctx.translate(x, y - 7 * ts); ctx.scale(ts, ts); G.text(ctx, str, 0, 0, c, 'font0'); ctx.restore(); };
-      say(name, tx, ny, col);
+      const say = (str, x, y, c, outline) => {
+        ctx.save(); ctx.translate(x, y - 7 * ts); ctx.scale(ts, ts);
+        if (outline) {
+          for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) G.text(ctx, str, dx, dy, '#c8c8c8', 'font0', 0, false);
+          G.text(ctx, str, 0, 0, c, 'font0', 0, false);
+        } else G.text(ctx, str, 0, 0, c, 'font0');
+        ctx.restore();
+      };
+      say(name, tx, ny, col, outlined);
       say(e.stats, sx, sy, '#d0d0d0');
       ctx.globalAlpha = 1;
       if (!p.alive) {
