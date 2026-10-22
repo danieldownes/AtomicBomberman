@@ -395,7 +395,10 @@
       if (bombDown && (!bombWas || poops) && !p.dis[DIS.CONSTIPATION] && p.held < 0) {
         const pcx = AB.cellX(p.x), pcy = AB.cellY(p.y);
         const here = this.bombAtCell(pcx, pcy);
-        if (here && here.owner === p.slot && p.pw[PW.GRAB] && !bombWas) {
+        // the glove picks a bomb up only when the button is really pressed: the presses poops makes
+        // would pick up every bomb it drops, and the pickup pose (no walking) would never end
+        const pressed = !!(p.inBits & AB.IN.BOMB) && !bombWas;
+        if (here && here.owner === p.slot && p.pw[PW.GRAB] && pressed) {
           // pick up our bomb
           here.motion = 3; here.holder = p.slot; this.bombAt[idx(here.cx, here.cy)] = -1;
           p.held = here.i; p.special = 4; p.specialT = 0;
