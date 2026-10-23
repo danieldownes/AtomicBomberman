@@ -53,11 +53,39 @@
       if (k.code === 'KeyM' && !cur.textEntry && !playerKey) {
         AB.musicMuted = !AB.musicMuted; A.setVolumes(AB.musicMuted ? 0 : AB.settings.musicVolume, AB.settings.sfxVolume); continue;
       }
+      // + / - (main keyboard or numpad): the game's volume, effects and music together, a tenth at a
+      // time (to hear each other over voice chat, or the game over the room)
+      const vol = VOLUME_KEYS[k.code];
+      if (vol && !cur.textEntry && !playerKey) { SC.gameVolume(vol); continue; }
       cur.key && cur.key(k);
     }
     cur.tick && cur.tick();
   };
-  SC.render = function (ctx) { cur.render && cur.render(ctx); };
+  const VOLUME_KEYS = { Equal: 1, NumpadAdd: 1, Minus: -1, NumpadSubtract: -1 };
+  let volumeShown = 0;
+  SC.gameVolume = function (d) {
+    const S = AB.settings, step = (v) => AB.clamp(Math.round(v * 10 + d) / 10, 0, 1);
+    S.sfxVolume = step(S.sfxVolume); S.musicVolume = step(S.musicVolume);
+    A.setVolumes(AB.musicMuted ? 0 : S.musicVolume, S.sfxVolume); AB.saveSettings();
+    A.play(20);
+    volumeShown = 1.6 * AB.TPS;
+  };
+  SC.render = function (ctx) {
+    cur.render && cur.render(ctx);
+    if (volumeShown > 0) {
+      volumeShown--;
+      const S = AB.settings, a = Math.min(1, volumeShown / (0.3 * AB.TPS));
+      ctx.save(); ctx.globalAlpha = a;
+      panel(ctx, 210, 406, 220, 62, 0.85);
+      centerText(ctx, 'Game volume', 410, YELLOW, 'font0');
+      // effects and music, as two ten-step bars
+      [[S.sfxVolume, 'effects', 432], [AB.musicMuted ? 0 : S.musicVolume, AB.musicMuted ? 'music (M: muted)' : 'music', 450]].forEach(([v, label, y]) => {
+        for (let i = 0; i < 10; i++) { ctx.fillStyle = i < Math.round(v * 10) ? YELLOW : 'rgba(255,255,255,0.18)'; ctx.fillRect(222 + i * 10, y, 8, 8); }
+        G.text(ctx, label, 328, y - 4, WHITE, 'font0');
+      });
+      ctx.restore();
+    }
+  };
   // help as an overlay: remember the current screen object and come back to it untouched
   let saved = null;
   SC.pushHelp = function (file) {

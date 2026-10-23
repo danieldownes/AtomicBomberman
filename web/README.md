@@ -64,6 +64,8 @@ Other keys:
 * F9: network figures (network games only)
 * F1: help for the current screen
 * M: mute music
+* + / - (main keyboard or numpad): game volume, effects and music together (handy over voice
+  chat). Not while typing a name, and not in a round if a player's keys use them.
 * F11: fullscreen
 
 ## Campaign Mode
