@@ -105,6 +105,8 @@
     if (!enabled || requested.has(name) || !asset('images', name)) return;
     requested.add(name); H.loadImage(name);
   };
+  // an arena's HD pictures: null (HD off), 'ready', 'failed' (the original pictures stand in), 'loading', 'idle'
+  H.arenaState = (level) => !enabled ? null : arenasReady.has(level) ? 'ready' : arenasFailed.has(level) ? 'failed' : arenasPending.has(level) ? 'loading' : 'idle';
   H.prepareArena = function (level, onProgress, retry = false) {
     if (!enabled) return Promise.resolve(true);
     if (retry) arenasFailed.delete(level);

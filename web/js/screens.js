@@ -260,7 +260,7 @@
   const yesno = (b) => (b ? 'Yes' : 'No');
   function blink() { return (frame >> 4) % 2 === 0; }
   // shared with the screens in js/screens2.js
-  SC.uiLate = () => ({ arenaPreview, arenaSummary, startMatch, nextRound, activeSetup, controlOptions, controlLabel });
+  SC.uiLate = () => ({ arenaPreview, shownPreview, cyclePreview, arenaSummary, startMatch, nextRound, activeSetup, controlOptions, controlLabel });
   SC.ui = { YELLOW, WHITE, GREY, ORANGE, CYAN, ListView, scrollbar, isOK: (k) => isOK(k), isBack: (k) => isBack(k), isBomb: (k) => isBomb(k), panel, glue, glueDim, menuCursor, f1Hint,
             centerText, drawTick, blink, miniHead, miniBomber, fmtTime, frame: () => frame };
 
@@ -552,6 +552,29 @@
   function arenaPreview(ctx, lvl, px, py, nx = 5, ny = 5) {
     AB.tilesets.preview(ctx, lvl, px, py, nx, ny);
   }
+  // The menus' arena previews switch to an arena only when its pictures are all in (tilesets
+  // previewReady), keeping the one before until then, and load the next ones ahead. `st` keeps the
+  // state on the screen; each returns the arena drawn (null: none ready yet).
+  // shownPreview: the arena `want`; also loads `ahead` (its neighbours in the list)
+  const clock = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  function shownPreview(st, ctx, want, ahead, px, py, nx, ny) {
+    const T = AB.tilesets;
+    T.loadPreview(want);
+    for (const l of ahead || []) T.loadPreview(l);
+    if (st.shown !== want && T.previewReady(want)) { st.shown = want; st.at = clock(); }
+    // (HD switched on since: that arena's HD pictures aren't in yet)
+    if (st.shown !== undefined && st.shown !== want && !T.previewReady(st.shown)) st.shown = undefined;
+    if (st.shown === undefined || !T.previewReady(st.shown)) return null;
+    arenaPreview(ctx, st.shown, px, py, nx, ny);
+    return st.shown;
+  }
+  // cyclePreview: each arena of `list` in turn, for `ms` once it's showing
+  function cyclePreview(st, ctx, list, ms, px, py, nx, ny) {
+    if (st.i === undefined) st.i = 0;
+    if (st.shown === list[st.i % list.length] && clock() - st.at >= ms && list.length > 1) st.i++;
+    const want = list[st.i % list.length];
+    return shownPreview(st, ctx, want, [list[(st.i + 1) % list.length]], px, py, nx, ny);
+  }
   SC.register('options', {
     help: 'options',
     enter() { this.sel = 4; },
@@ -590,9 +613,8 @@
       const S = AB.settings, pv = AB.val(730, [400, 100, 5, 5]);
       const on = []; for (let i = 0; i < AB.LEVELS; i++) if (AB.arenaOn(S, i)) on.push(i);
       const list = on.length ? on : [...Array(AB.LEVELS).keys()];
-      const lvl = list[Math.floor(frame / 90) % list.length];
-      arenaPreview(ctx, lvl, pv[0], pv[1], pv[2], pv[3]);
-      G.text(ctx, AB.levelName(lvl), pv[0] + pv[2] * AB.CW / 2, pv[1] + pv[3] * AB.CH + 8, WHITE, 'font1', 1);
+      const lvl = cyclePreview(this.pv = this.pv || {}, ctx, list, 1500, pv[0], pv[1], pv[2], pv[3]);
+      if (lvl !== null) G.text(ctx, AB.levelName(lvl), pv[0] + pv[2] * AB.CW / 2, pv[1] + pv[3] * AB.CH + 8, WHITE, 'font1', 1);
       const n = AB.setup.filter(st => st.control !== 'off').length;
       G.text(ctx, `${n} players     Left/Right: change     Enter: start     Esc: back`, 320, 418, GREY, 'font0', 1);
       f1Hint(ctx);

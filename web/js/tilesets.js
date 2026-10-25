@@ -66,6 +66,25 @@
       G.draw(ctx, seq, state, x, y, -1, false);
     }
   };
+  // Menus show an arena's preview only once everything it draws is in, the floor picture and the
+  // blocks (in HD the arena's HD pictures; a set that failed falls back to the original's), so it
+  // never appears piece by piece. loadPreview starts loading it.
+  const hdState = (level) => (AB.hd && AB.hd.arenaState ? AB.hd.arenaState(level) : null);
+  const hdField = (level) => !!(AB.hd && AB.hd.active() && AB.hd.imageInfo && AB.hd.imageInfo('field' + level));
+  // the original floor picture is needed when there's no HD one (HD off, an arena HD keeps original,
+  // a download that failed) or the arena's texture set failed
+  const retroField = (level) => (defFor(level) ? T.status(level) === 'failed' : !hdField(level) || hdState(level) === 'failed');
+  T.loadPreview = function (level) {
+    T.load(level);
+    if (retroField(level)) (G.loadRetroImage || G.loadImage)('field' + T.baseLevel(level), { priority: 'low', retries: 1 });
+  };
+  T.previewReady = function (level) {
+    const hs = hdState(level);
+    if (hs === 'idle' || hs === 'loading') return false;
+    if (defFor(level)) { const st = T.status(level); if (st === 'ready') return true; if (st !== 'failed') return false; }
+    else if (!retroField(level)) return !!AB.hd.image('field' + level);
+    return G.isLoaded('field' + T.baseLevel(level));
+  };
   // a corner of the arena with the current scheme's blocks (menus)
   T.preview = function (ctx, level, px, py, nx = 5, ny = 5) {
     T.load(level);

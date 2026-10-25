@@ -54,12 +54,17 @@
       });
       // preview of the highlighted arena
       const row = rows[this.sel];
-      const lvl = row.lvl !== undefined ? row.lvl : (Math.floor(U.frame() / 90) % AB.LEVELS);
-      SC.uiLate().arenaPreview(ctx, lvl, 360, 96, 6, 6);
+      // (only once its pictures are in; the arenas either side load ahead)
+      const L = SC.uiLate(), pst = this.pv = this.pv || {};
+      const lvl = row.lvl !== undefined
+        ? L.shownPreview(pst, ctx, row.lvl, [row.lvl - 1, row.lvl + 1].filter(l => l >= 0 && l < AB.LEVELS), 360, 96, 6, 6)
+        : L.cyclePreview(pst, ctx, [...Array(AB.LEVELS).keys()], 1500, 360, 96, 6, 6);
       ctx.strokeStyle = 'rgba(248,216,72,0.6)'; ctx.strokeRect(359.5, 95.5, 241, 217);
-      G.text(ctx, AB.levelName(lvl), 480, 322, WHITE, 'font1', 1);
-      const note = lvl === AB.CLASSIC_LEVEL ? 'port addition: 8-bit theme' : lvl === AB.BEDROCK_LEVEL ? 'port addition: new terrain' : NOTE[lvl];
-      if (note) G.text(ctx, '(' + note + ')', 480, 344, CYAN, 'font0', 1);
+      if (lvl !== null) {
+        G.text(ctx, AB.levelName(lvl), 480, 322, WHITE, 'font1', 1);
+        const note = lvl === AB.CLASSIC_LEVEL ? 'port addition: 8-bit theme' : lvl === AB.BEDROCK_LEVEL ? 'port addition: new terrain' : NOTE[lvl];
+        if (note) G.text(ctx, '(' + note + ')', 480, 344, CYAN, 'font0', 1);
+      }
       G.text(ctx, 'Up/Down: choose   Enter/Space: tick   Esc: back', 320, 412, GREY, 'font0', 1);
       if (this.err > 0) { U.panel(ctx, 140, 200, 360, 44, 0.92); U.centerText(ctx, 'Tick at least one arena', 214, ORANGE); }
     },
