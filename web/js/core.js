@@ -163,6 +163,8 @@ window.AB = window.AB || {};
       soundVariety: 'normal',               // how many phrases per event each round: few | normal | lots | all
       musicVolume: 0.7,
       sfxVolume: 0.9,
+      netMusicVolume: 0.2,                  // network play's own volumes, lower so voice chat comes through
+      netSfxVolume: 0.4,                    // (js/screens.js netVolumes)
     };
   };
   AB.PLAY_TIMES = [60, 90, 120, 150, 180, 240, 300, 600, 0];

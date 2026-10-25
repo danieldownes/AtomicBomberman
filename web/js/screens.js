@@ -20,6 +20,23 @@
   if (AB.settings.noGameMusic) { AB.settings.gameMusic = {}; for (const t of AB.MUSIC_TRACKS) AB.settings.gameMusic[t.id] = false; }
   delete AB.settings.noGameMusic;
   AB.saveSettings = () => save('ab_settings', AB.settings);
+  // Network play has game volumes of its own (lower to start with, so voice chat comes through): from
+  // the network lobby on the game plays at those, and back on the main menu at the usual ones again.
+  // Meanwhile the usual ones wait in volStash, saved with the settings, so a page closed in a room
+  // opens again at them. (Whatever changes the volumes then, + / - or Voice and sound, changes the
+  // network ones.)
+  SC.netVolumes = function (on) {
+    const S = AB.settings, vol = (v, d) => (typeof v === 'number' && v >= 0 && v <= 1 ? v : d);
+    if (on === !!S.volStash) return;
+    if (on) { S.volStash = { sfx: S.sfxVolume, music: S.musicVolume }; S.sfxVolume = vol(S.netSfxVolume, 0.4); S.musicVolume = vol(S.netMusicVolume, 0.2); }
+    else {
+      S.netSfxVolume = S.sfxVolume; S.netMusicVolume = S.musicVolume;
+      S.sfxVolume = vol(S.volStash.sfx, 0.9); S.musicVolume = vol(S.volStash.music, 0.7); delete S.volStash;
+    }
+    AB.saveSettings();
+    if (A.setVolumes) A.setVolumes(AB.musicMuted ? 0 : S.musicVolume, S.sfxVolume);
+  };
+  SC.netVolumes(false);
   const defaultSetup = () => Array.from({ length: 10 }, (_, i) => ({ control: i === 0 ? 'key0' : i < 4 ? 'ai' : 'off', team: i < 5 ? 0 : 1 }));
   AB.setup = load('ab_setup', null) || defaultSetup();
   if (!Array.isArray(AB.setup) || AB.setup.length !== 10) AB.setup = defaultSetup();
@@ -381,7 +398,7 @@
   ];
   SC.register('mainmenu', {
     help: 'manual',
-    enter() { this.sel = this.sel || 0; this.idle = 0; this.confirm = false; this.error = ''; A.music('menu'); },
+    enter() { this.sel = this.sel || 0; this.idle = 0; this.confirm = false; this.error = ''; SC.netVolumes(false); A.music('menu'); },
     toggleHD() {
       if (!AB.hd || this.loadingHD) return;
       const on = !AB.hd.active(); this.loadingHD = true; this.hdProgress = 0; this.error = '';

@@ -80,6 +80,9 @@
     '   other over the game, or the game over the room. While you do,',
     '   a meter shows the voices above the game, as loud as each is',
     '   heard. The voices have their own volume in Voice and sound.',
+    ' - Network play has game volumes of its own, sounds 4 and music',
+    '   2 to start with, so the voices come through; the main menu',
+    '   goes back to your usual ones.',
     ' - Voice chat in the room menu: on or off, the microphone, the',
     '   voice gate (sends only while you speak; set its level with the',
     '   meter), the volume of everyone and of each person, and "Lower',
@@ -370,6 +373,7 @@
     help: 'portnet',
     get textEntry() { return this.editing; },
     enter() {
+      SC.netVolumes(true);   // (network play's own game volumes, until the main menu)
       // first visit: start on the name, so it's obvious it can be changed
       if (this.sel === undefined) this.sel = AB.settings.netNameSet ? 2 : 0;
       this.editing = false; this.busy = null; this.err = NM.notice || null; this.errT = NM.notice ? 400 : 0; NM.notice = null;
@@ -607,7 +611,7 @@
   SC.register('room', {
     help: 'portnet',
     enter() {
-      this.err = null; this.errT = 0;
+      this.err = null; this.errT = 0; SC.netVolumes(true);
       NP.leaveLobby(); NM.chatMusic('menu');
       if (NP.room && NP.room.host) { NP.room.inGame = false; NP.setState('waiting'); }
       // the host starts on START, a member on its only choice, Voice chat
@@ -841,7 +845,7 @@
       const tip = V.mic === 'denied' ? 'Your browser blocked the microphone: allow it in the address bar, then Enter on Microphone. You still hear the others.'
         : sk === 'duck' ? 'While someone else talks, your game goes down this far: more each step, 10 nearly silent.'
         : 'Headphones sound clearest. Others hear you while the level bar is green.';
-      G.text(ctx, fit('The game volumes leave the voices as they are; + / - change them anywhere.', 560, 'font0'), 320, 380, GREY, 'font0', 1);
+      G.text(ctx, fit('Network play has game volumes of its own, until the main menu; + / - change them too.', 560, 'font0'), 320, 380, GREY, 'font0', 1);
       G.text(ctx, fit(tip, 560, 'font0'), 320, 398, GREY, 'font0', 1);
       G.text(ctx, 'Up/Down: choose   Left/Right: change   Enter: toggle   Esc: back', 320, 420, GREY, 'font0', 1);
     },
