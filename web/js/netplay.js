@@ -34,6 +34,8 @@
   NP.cidTag = (cid) => { let h = 7; for (const ch of String(cid)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0; return h.toString(36); };
   NP.roomPeerId = (n) => PREFIX + n;
   const now = () => performance.now();
+  // on entering a room with voice chat: the keys for it (the game's volume leaves the voices alone)
+  const voiceTip = (room) => { if (AB.voice.active()) room.say('Voice chat on: V mutes your mic, + / - change the game volume (not the voices).'); };
 
   // ---------------------------------------------------------------- PeerJS
   let libP = null;
@@ -292,7 +294,7 @@
         NP.room = room;
         const lr = L.rooms[n - 1]; if (lr.conn) try { lr.conn.close(); } catch (e) {} lr.conn = null; lr.state = 'waiting';
         startHostTimers(room);
-        AB.voice.start();
+        AB.voice.start(); voiceTip(room);
         res(room);
       });
       peer.on('error', (err) => {
@@ -485,7 +487,7 @@
         if (!m || typeof m !== 'object') return;
         room.lastSeen = now();
         if (m.t === 'reject') { clearTimeout(to); room.fail(m.reason); return; }
-        if (m.t === 'welcome') { clearTimeout(to); done = true; room.connecting = false; room.me = m.id; room.rejoin = !!m.rejoin; room.say(m.rejoin ? 'Back in room ' + n + ': you play again from the next round.' : 'Joined room ' + n + '.'); startMemberTimer(room); openHostGame(room); AB.voice.start(); res(room); return; }
+        if (m.t === 'welcome') { clearTimeout(to); done = true; room.connecting = false; room.me = m.id; room.rejoin = !!m.rejoin; room.say(m.rejoin ? 'Back in room ' + n + ': you play again from the next round.' : 'Joined room ' + n + '.'); startMemberTimer(room); openHostGame(room); AB.voice.start(); voiceTip(room); res(room); return; }
         if (m.t === 'room') { room.info = m.info; room.state = m.info.state; room.members = m.info.members; room.ais = m.info.ais; room.aiLevel = m.info.aiLevel || 'hard'; emit({ t: 'room' }); updateMesh(room); syncVoice(); return; }
         if (m.t === 'ping') { c.send({ t: 'pong', ts: m.ts }); return; }
         if (m.t === 'talk') { AB.voice.setTalking(m.id, !!m.on); return; }

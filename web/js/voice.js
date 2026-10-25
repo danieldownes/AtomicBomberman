@@ -155,6 +155,8 @@
       r.stream = st;
       if (!r.el) { r.el = document.createElement('audio'); r.el.autoplay = true; r.el.style.display = 'none'; document.body.appendChild(r.el); }
       r.el.srcObject = st;
+      // (and to the level meter, for the volume overlay)
+      try { r.an = actx.createAnalyser(); r.an.fftSize = 1024; r.src = actx.createMediaStreamSource(st); r.src.connect(r.an); } catch (e) { r.an = null; }
       applyVolume(id);
       r.el.play().catch(() => {});
     });
@@ -167,6 +169,7 @@
     const r = remotes.get(id); if (!r) return;
     remotes.delete(id);
     try { r.call.close(); } catch (e) {}
+    if (r.src) try { r.src.disconnect(); } catch (e) {}
     if (r.el) { r.el.srcObject = null; r.el.remove(); }
     delete V.talking[id];
   };
@@ -181,6 +184,17 @@
     r.el.volume = AB.clamp((V.cfg().volume / 10) * (V.volumeOf(name) / 10), 0, 1);
   }
   V.applyVolumes = () => { for (const id of remotes.keys()) applyVolume(id); };
+  // the others' voices as heard now (the loudest, its volumes applied), their volume (the loudest
+  // anyone plays at) and how many are connected: on the scale of AB.audio.gameLevel
+  V.heard = function () {
+    let level = 0, vol = 0, n = 0;
+    for (const r of remotes.values()) {
+      if (!r.el || !r.stream) continue;
+      n++; vol = Math.max(vol, r.el.volume);
+      if (r.an) level = Math.max(level, r.el.volume * AB.audio.levelPos(AB.audio.rmsOf(r.an)));
+    }
+    return { level, vol: n ? vol : V.cfg().volume / 10, n };
+  };
   V.setTalking = function (id, on) { if (on) V.talking[id] = true; else delete V.talking[id]; };
   // is this computer (id) speaking right now? (mine: my own gate)
   V.isTalking = (id, mine) => (mine ? V.open : !!V.talking[id]);

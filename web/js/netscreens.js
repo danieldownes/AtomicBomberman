@@ -75,6 +75,11 @@
     '   microphone; without it you still hear the others.',
     ' - V mutes or unmutes your microphone (in the room and in game).',
     '   A speaker by a name, or over a bomberman, shows who speaks.',
+    ' - + / - (either pair of keys) turn the game\'s sounds and music',
+    '   up or down, and leave the voices as they are: to hear each',
+    '   other over the game, or the game over the room. While you do,',
+    '   a meter shows the voices above the game, as loud as each is',
+    '   heard. The voices have their own volume in Voice and sound.',
     ' - Voice chat in the room menu: on or off, the microphone, the',
     '   voice gate (sends only while you speak; set its level with the',
     '   meter), the volume of everyone and of each person.',
@@ -702,7 +707,7 @@
       const logY = ly + lines.length * 14 + 6;
       room.log.slice(-AB.clamp(Math.floor((412 - logY) / 14), 0, 4) || room.log.length).forEach((t, i) => G.text(ctx, t, 56, logY + i * 14, '#9aa', 'font0'));
       const mus = 'M: music ' + (AB.settings.chatQuiet ? 'on' : 'off');
-      const hint = room.host ? `Up/Down: choose   Enter: select   V: mute your mic   ${mus}   Esc: close the room` : `Up/Down: choose   Enter: open   V: mute your mic   ${mus}   Esc: leave the room`;
+      const hint = room.host ? `Enter: select   V: mute your mic   + / -: game volume   ${mus}   Esc: close the room` : `Enter: open   V: mute your mic   + / -: game volume   ${mus}   Esc: leave the room`;
       G.text(ctx, hint, 320, 420, GREY, 'font0', 1);
       if (this.errT > 0) { U.panel(ctx, 60, 196, 520, 50, 0.92); U.centerText(ctx, fit(this.err, 500, 'font0'), 214, ORANGE, 'font0'); }
     },
@@ -832,6 +837,7 @@
       });
       const tip = V.mic === 'denied' ? 'Your browser blocked the microphone: allow it in the address bar, then Enter on Microphone. You still hear the others.'
         : 'Headphones sound clearest. Others hear you while the level bar is green.';
+      G.text(ctx, fit('The game volumes leave the voices as they are; + / - change them anywhere.', 560, 'font0'), 320, 380, GREY, 'font0', 1);
       G.text(ctx, fit(tip, 560, 'font0'), 320, 398, GREY, 'font0', 1);
       G.text(ctx, 'Up/Down: choose   Left/Right: change   Enter: toggle   Esc: back', 320, 420, GREY, 'font0', 1);
     },

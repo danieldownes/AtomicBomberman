@@ -130,7 +130,12 @@
       const drawRow = (i, y, h, w = 312) => { const sel = i === this.sel; if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.16)'; ctx.fillRect(32, y - 3, w, h); U.menuCursor(ctx, 44, y + 15); } return sel; };
       let sel = drawRow(0, 78, 22, 576);
       G.text(ctx, 'Preset:', 62, 78, sel ? YELLOW : WHITE, 'font1');
-      G.text(ctx, fit(`${pr.name(this.players)} (${prKeys.length})` + (sel ? '   < >' : ''), 470), 132, 82, sel ? YELLOW : CYAN, 'font0');
+      G.text(ctx, fit(`${pr.name(this.players)} (${prKeys.length})` + (sel ? '   < >' : ''), sel ? 320 : 470, 'font0'), 132, 82, sel ? YELLOW : CYAN, 'font0');
+      // (Left/Right only browse the presets; Enter ticks the one shown)
+      if (sel) {
+        const inUse = prKeys.length > 0 && AB.schemeKeys().every(key => !!on[key] === prKeys.includes(key));
+        G.text(ctx, inUse ? '(selected)' : '(press Enter to select)', 604, 82, inUse ? '#60f060' : GREY, 'font0', 2);
+      }
       sel = drawRow(1, 102, 22);
       G.text(ctx, 'Done', 62, 102, sel ? YELLOW : WHITE, 'font1');
       const view = this.view = this.view || new U.ListView();

@@ -11,7 +11,7 @@
   const A = AB.audio = {};
   const SL = window.AB_DATA.sounds;          // SOUNDLST id -> clip name
   const CAT = window.AB_SOUNDS || { events: [], clips: {} };
-  let ctx = null, sfxGain = null, musicGain = null;
+  let ctx = null, sfxGain = null, musicGain = null, sfxIn = null, musicIn = null, sfxTap = null, musicTap = null;
   const buffers = {};                        // name -> AudioBuffer | Promise | 'bad'
   const playing = [];
   let music = null, musicName = null, musicVol = 0.7, sfxVol = 0.9, enabled = true;
@@ -188,6 +188,10 @@
       ctx = new C();
       sfxGain = ctx.createGain(); sfxGain.gain.value = sfxVol; sfxGain.connect(ctx.destination);
       musicGain = ctx.createGain(); musicGain.gain.value = musicVol * duck; musicGain.connect(ctx.destination);
+      // what plays goes in at sfxIn / musicIn, ahead of the volumes, where the level meter listens
+      sfxIn = ctx.createGain(); sfxIn.connect(sfxGain); musicIn = ctx.createGain(); musicIn.connect(musicGain);
+      sfxTap = ctx.createAnalyser(); sfxTap.fftSize = 1024; sfxIn.connect(sfxTap);
+      musicTap = ctx.createAnalyser(); musicTap.fftSize = 1024; musicIn.connect(musicTap);
       // a seamless-loop track that had to start on an <audio> element: carry on in Web Audio from here
       if (music && musicName && music.loop && A.MUSIC_LOOPS[musicName]) startLoop(musicName, music.currentTime || 0);
     }
@@ -227,7 +231,7 @@
     const src = ctx.createBufferSource(); src.buffer = buf; src.playbackRate.value = rate;
     let node = src;
     if (vol !== 1) { const g = ctx.createGain(); g.gain.value = vol; src.connect(g); node = g; }
-    node.connect(sfxGain);
+    node.connect(sfxIn);
     src.start(0, buf._start || 0);
     src._tag = tag;
     playing.push(src);
@@ -377,7 +381,7 @@
     const tok = wl = { name, src: null };
     const go = (lb) => {
       if (wl !== tok || musicName !== name) return;
-      const s = ctx.createBufferSource(); s.buffer = lb; s.loop = true; s.connect(musicGain);
+      const s = ctx.createBufferSource(); s.buffer = lb; s.loop = true; s.connect(musicIn);
       s.start(0, offset % lb.duration);
       tok.src = s;
       if (music) { try { music.pause(); } catch (e) {} music.src = ''; music = null; }   // (it was carrying on until now)
@@ -421,4 +425,39 @@
   A.duckLevel = () => duck;
   A.setDuck = function (f) { f = AB.clamp(f, 0, 1); if (f === duck) return; duck = f; applyVol(); };
   A.setEnabled = (e) => { enabled = e; };
+
+  // ---- level meter: the volume overlay (+ / -) shows the game against the voices of voice chat ----
+  // A level 0..1 is decibels from -54 dBFS (0) to -6 dBFS (1), the same for both, from the sound as
+  // it comes in (before the volumes); the overlay scales it by the volume it plays at.
+  A.levelPos = (rms) => AB.clamp((20 * Math.log10(rms + 1e-9) + 54) / 48, 0, 1);
+  const tapBuf = new Float32Array(1024);
+  A.rmsOf = function (an) {
+    an.getFloatTimeDomainData(tapBuf);
+    let sum = 0; for (let i = 0; i < tapBuf.length; i++) sum += tapBuf[i] * tapBuf[i];
+    return Math.sqrt(sum / tapBuf.length);
+  };
+  // music on an <audio> element (the tracks that don't loop in Web Audio): heard through captureStream,
+  // which leaves the element playing as it was (not offered opened from disk, or by every browser)
+  let elTap = null;
+  function elementRms() {
+    if (!music || music.paused || !ctx) return 0;
+    if (!elTap || elTap.el !== music) {
+      if (elTap && elTap.src) try { elTap.src.disconnect(); } catch (e) {}
+      elTap = { el: music, st: null, src: null, an: null };
+      try { if (music.captureStream) elTap.st = music.captureStream(); } catch (e) {}
+    }
+    const T = elTap;
+    if (!T.an && T.st && T.st.getAudioTracks().length) {
+      try { T.an = ctx.createAnalyser(); T.an.fftSize = 1024; T.src = ctx.createMediaStreamSource(T.st); T.src.connect(T.an); } catch (e) { T.st = null; T.an = null; }
+    }
+    return T.an ? A.rmsOf(T.an) : 0;
+  }
+  // the game as heard now (effects and music, their volumes and the voice-chat ducking applied), and
+  // its volume, on the scale above
+  A.gameLevel = function () {
+    const vol = Math.max(sfxVol, musicVol);
+    if (!sfxTap) return { level: 0, vol };
+    const fx = sfxVol * A.levelPos(A.rmsOf(sfxTap)), mu = musicVol * A.levelPos(Math.max(A.rmsOf(musicTap), elementRms()));
+    return { level: Math.max(fx, mu) * duck, vol };
+  };
 })(window.AB);

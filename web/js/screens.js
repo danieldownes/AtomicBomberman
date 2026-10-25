@@ -80,28 +80,52 @@
   };
   const VOLUME_KEYS = { Equal: 1, NumpadAdd: 1, Minus: -1, NumpadSubtract: -1 };
   let volumeShown = 0;
+  const meters = { game: 0, voice: 0 };
   SC.gameVolume = function (d) {
     const S = AB.settings, step = (v) => AB.clamp(Math.round(v * 10 + d) / 10, 0, 1);
     S.sfxVolume = step(S.sfxVolume); S.musicVolume = step(S.musicVolume);
     A.setVolumes(AB.musicMuted ? 0 : S.musicVolume, S.sfxVolume); AB.saveSettings();
     A.play(20);
-    volumeShown = 1.6 * AB.TPS;
+    // (longer with voice chat, to see the voices against the game)
+    volumeShown = (AB.voice && AB.voice.active() ? 3 : 1.6) * AB.TPS;
   };
+  // a ten-step bar: the volume it's set to dim, the level heard right now bright over it (both 0..1)
+  function meterBar(ctx, x, y, vol, level, col, dim) {
+    for (let i = 0; i < 10; i++) {
+      const sx = x + i * 15, v = AB.clamp(vol * 10 - i, 0, 1), l = AB.clamp(level * 10 - i, 0, 1);
+      ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.fillRect(sx, y, 13, 8);
+      if (v > 0) { ctx.fillStyle = dim; ctx.fillRect(sx, y, Math.round(13 * v), 8); }
+      if (l > 0) { ctx.fillStyle = col; ctx.fillRect(sx, y, Math.round(13 * l), 8); }
+    }
+  }
+  // the game's volume (+ / -): one bar for its effects and music, filled as loud as it plays now; in a
+  // room with voice chat, the others' voices the same way above it, to set the game against them
+  function volumeOverlay(ctx) {
+    volumeShown--;
+    const S = AB.settings, V = AB.voice, a = Math.min(1, volumeShown / (0.3 * AB.TPS));
+    const heard = V && V.active() && V.heard ? V.heard() : null, voice = !!(heard && heard.n);
+    const g = A.gameLevel ? A.gameLevel() : { level: 0 }, set = Math.max(S.sfxVolume, AB.musicMuted ? 0 : S.musicVolume);
+    const smooth = (k, t) => (meters[k] = t > meters[k] ? t : meters[k] * 0.9 + t * 0.1);
+    const h = voice ? 84 : 48, x = 170, y = 470 - h;
+    ctx.save(); ctx.globalAlpha = a;
+    panel(ctx, x, y, 300, h, 0.85);
+    centerText(ctx, `Game volume  ${Math.round(set * 10)} / 10`, y + 4, YELLOW, 'font0');
+    let ry = y + 26;
+    if (voice) {
+      G.text(ctx, 'Voices', x + 14, ry - 4, WHITE, 'font0');
+      meterBar(ctx, x + 66, ry, heard.vol, smooth('voice', heard.level), '#60f060', 'rgba(96,240,96,0.28)');
+      G.text(ctx, Object.keys(V.talking).length ? 'talking' : 'quiet', x + 288, ry - 4, GREY, 'font0', 2);
+      ry += 18;
+    }
+    G.text(ctx, 'Game', x + 14, ry - 4, WHITE, 'font0');
+    meterBar(ctx, x + 66, ry, set, smooth('game', g.level), YELLOW, 'rgba(248,216,72,0.3)');
+    if (AB.musicMuted) G.text(ctx, 'music off', x + 288, ry - 4, GREY, 'font0', 2);
+    if (voice) G.text(ctx, '+ / - change the game, not the voices', 320, ry + 14, GREY, 'font0', 1);
+    ctx.restore();
+  }
   SC.render = function (ctx) {
     cur.render && cur.render(ctx);
-    if (volumeShown > 0) {
-      volumeShown--;
-      const S = AB.settings, a = Math.min(1, volumeShown / (0.3 * AB.TPS));
-      ctx.save(); ctx.globalAlpha = a;
-      panel(ctx, 210, 406, 220, 62, 0.85);
-      centerText(ctx, 'Game volume', 410, YELLOW, 'font0');
-      // effects and music, as two ten-step bars
-      [[S.sfxVolume, 'effects', 432], [AB.musicMuted ? 0 : S.musicVolume, AB.musicMuted ? 'music (M: muted)' : 'music', 450]].forEach(([v, label, y]) => {
-        for (let i = 0; i < 10; i++) { ctx.fillStyle = i < Math.round(v * 10) ? YELLOW : 'rgba(255,255,255,0.18)'; ctx.fillRect(222 + i * 10, y, 8, 8); }
-        G.text(ctx, label, 328, y - 4, WHITE, 'font0');
-      });
-      ctx.restore();
-    }
+    if (volumeShown > 0) volumeOverlay(ctx);
   };
   // help as an overlay: remember the current screen object and come back to it untouched
   let saved = null;
