@@ -180,7 +180,7 @@
     // the closing walls' blocks dropping in: bigger and fainter the higher they are, landing on the tick
     // the game sets the block (on an empty cell, a brick, or a block already there)
     for (const u of falling) {
-      const p = 1 - u.in / FALL, q = p * p, sc = 1 + 0.6 * (1 - q), lift = 72 * (1 - q);
+      const p = 1 - u.in / FALL, q = p * p, sc = 1 + 0.42 * (1 - q), lift = 50 * (1 - q);
       const cx = cellL(u.x) + 20, cy = cellT(u.y) + 18;
       ctx.save(); ctx.globalAlpha = Math.min(1, p * 1.8);
       ctx.translate(cx, cy - lift); ctx.scale(sc, sc);
