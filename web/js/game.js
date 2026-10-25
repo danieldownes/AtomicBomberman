@@ -157,7 +157,13 @@
         if (!AB.inArena(x, y)) continue;
         const d = { N: 0, E: 1, S: 2, W: 3 }[e.dir];
         this.extras[idx(x, y)] = e.t === 'warp' ? { t: 'warp', id: e.id, dest: e.dest } : { t: e.t, dir: d };
-        if (e.t === 'warp') this.tiles[idx(x, y)] = T_BLANK;
+        // a warp hole knocks out its own cell and one of its four neighbours, north, east, south or west
+        // at random (again if that's off the arena), whatever is there, so there's always a way out of
+        // it (fcn.004056ca, "knocking out %u,%u", once at the start of the round)
+        if (e.t === 'warp') {
+          this.tiles[idx(x, y)] = T_BLANK;
+          for (;;) { const k = rng.int(4), nx = x + DX[k], ny = y + DY[k]; if (AB.inArena(nx, ny)) { this.tiles[idx(nx, ny)] = T_BLANK; break; } }
+        }
       }
       for (const e of tramps) {
         let x, y;
