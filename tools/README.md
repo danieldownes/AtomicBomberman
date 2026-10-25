@@ -16,6 +16,9 @@ pycdlib, plus ffmpeg. The victory-art build also needs Node.js with `sharp` avai
      `pack.js` and the `voices_report.json` it also writes.
    * `python build_sounds.py ../extracted/DATA/RES/SOUNDLST.RES voice_transcripts.json voices_classified.js <sfx mp3 folder> <unused mp3 folder> ../web`
      writes `data/sounds.js` (events > phrases > takes) and one `audio/clips/<name>.js` per clip.
+     It ends by running `python add_port_sounds.py`, which adds the port's own sounds (the
+     Wilhelm scream, from `port_sounds/`; `--wilhelm SESSION.flac` cuts it from the CC0 session
+     recording) and can be run on its own (from the repository root, with ffmpeg).
 5. Port additions:
    * `python build_campaigns.py ../extracted/DATA/RES ../web` converts the campaign stages (`*.CAM`).
    * `python build_classic.py ../web` draws the Classic arena (`data/classic.js`, `img/field11.png`).

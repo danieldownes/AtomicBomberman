@@ -23,3 +23,5 @@ output/hd/repair/playback/
 output/hd/repair/baseline-hashes.json
 output/hd/repair/*-candidate.png
 tools/__pycache__/
+# downloaded source recordings (tools/port_sounds/README.md says where from)
+output/sounds/

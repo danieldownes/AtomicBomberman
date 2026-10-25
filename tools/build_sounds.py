@@ -190,3 +190,8 @@ for n in sorted(have):
     written += 1
 ng = sum(len(e['groups']) for e in events)
 print('events', len(events), 'phrases', ng, 'clips in catalog', len(clips), 'clip files', written)
+# the port's own additions (the Wilhelm scream...): tools/add_port_sounds.py
+import importlib.util
+spec = importlib.util.spec_from_file_location('add_port_sounds', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'add_port_sounds.py'))
+aps = importlib.util.module_from_spec(spec); spec.loader.exec_module(aps)
+aps.WEB = web; aps.add()

@@ -229,6 +229,11 @@ These are under main menu > Options, next to the original settings.
   Your own ticks are kept on top of the preset. **Variety each round** sets how many different
   phrases each event gets per round. Every round picks a new handful of the ticked sounds and
   loads only those.
+
+  One sound is the port's own: the **Wilhelm scream**, a third take of "Caught in the flames"
+  (about one death in three). It is the fourth scream of the original 1951 recording session,
+  which USC released into the public domain (CC0); see `tools/port_sounds/README.md`. It plays in
+  the Child friendly, Extended and Uncensored presets, not in Original set.
 * **Idle Animations**: four animations found unused on the CD (meditating, wiping his head,
   eating an apple, blowing on his knuckles). One plays when a player stands still for five
   seconds.
