@@ -47,13 +47,36 @@
     return out;
   };
   let padPrev = [];
-  function padBits(p) {
-    let b = 0; const ax = p.axes || [], bt = p.buttons || [];
-    const pr = (i) => bt[i] && (bt[i].pressed || bt[i].value > 0.5);
-    if ((ax[1] || 0) < -0.5 || pr(12)) b |= AB.IN.UP;
-    if ((ax[1] || 0) > 0.5 || pr(13)) b |= AB.IN.DOWN;
-    if ((ax[0] || 0) < -0.5 || pr(14)) b |= AB.IN.LEFT;
-    if ((ax[0] || 0) > 0.5 || pr(15)) b |= AB.IN.RIGHT;
+  // The stick, read with thresholds so it doesn't flicker or turn by accident: it counts once pushed
+  // half way out and stops under a third; then its angle picks straight up, down, left or right
+  // (within 30 degrees of them) or, between those, the diagonal's two directions, which turn a corner
+  // as soon as it opens (js/game.js chooseDir, where the direction pressed last leads). Crossing from
+  // one of those to the next takes 6 degrees past the edge, so a stick held on an edge stays put.
+  const IN_AT = 0.5, OUT_AT = 0.33, STRAIGHT = 30, STICKY = 6;
+  const SECTORS = [AB.IN.RIGHT, AB.IN.RIGHT | AB.IN.DOWN, AB.IN.DOWN, AB.IN.DOWN | AB.IN.LEFT,
+    AB.IN.LEFT, AB.IN.LEFT | AB.IN.UP, AB.IN.UP, AB.IN.UP | AB.IN.RIGHT];
+  const padStick = [];   // pad -> the stick's sector last read (0..7 from right, clockwise; -1 centred)
+  const half = (s) => (s % 2 ? 45 - STRAIGHT : STRAIGHT);
+  const off = (a, s) => Math.abs(((a - s * 45 + 540) % 360) - 180);   // degrees from a sector's middle
+  I.stickBits = function (i, x, y) {
+    const prev = padStick[i] === undefined ? -1 : padStick[i], m = Math.hypot(x, y);
+    if (m < (prev < 0 ? IN_AT : OUT_AT)) { padStick[i] = -1; return 0; }
+    const a = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;   // 0 = right, clockwise (y is down)
+    let s = prev;
+    if (s < 0 || off(a, s) > half(s) + STICKY) for (s = 0; s < 8 && off(a, s) > half(s); s++);
+    padStick[i] = s;
+    return SECTORS[s];
+  };
+  function padBits(p, i) {
+    const ax = p.axes || [];
+    let b = I.stickBits(i, ax[0] || 0, ax[1] || 0);
+    const bt = p.buttons || [];
+    const pr = (k) => bt[k] && (bt[k].pressed || bt[k].value > 0.5);
+    // the d-pad: buttons, like keys
+    if (pr(12)) b |= AB.IN.UP;
+    if (pr(13)) b |= AB.IN.DOWN;
+    if (pr(14)) b |= AB.IN.LEFT;
+    if (pr(15)) b |= AB.IN.RIGHT;
     if (pr(0)) b |= AB.IN.BOMB;
     if (pr(1) || pr(2)) b |= AB.IN.ACTION;
     return b;
@@ -63,7 +86,7 @@
     const pads = I.pads();
     padHeld.clear();
     pads.forEach((p, i) => {
-      const b = padBits(p), o = padPrev[i] || 0, e = b & ~o;
+      const b = padBits(p, i), o = padPrev[i] || 0, e = b & ~o;
       if (b & AB.IN.UP) padHeld.add('ArrowUp');
       if (b & AB.IN.DOWN) padHeld.add('ArrowDown');
       if (e & AB.IN.UP) pressedQueue.push({ code: 'ArrowUp', pad: i });
@@ -93,7 +116,7 @@
     }
     if (dev.type === 'joy') {
       const p = I.pads()[dev.n];
-      return p ? padBits(p) : 0;
+      return p ? padBits(p, dev.n) : 0;
     }
     return 0;
   };

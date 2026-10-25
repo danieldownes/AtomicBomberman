@@ -4,7 +4,7 @@
 // the DOM or Math.random. That makes it suitable for rollback network play (see js/net.js).
 // Mechanics follow the original BM95.EXE (decompiled with angr/radare2) and its VALUELST.RES values:
 //   - movement in 1-pixel steps with perpendicular auto-centering and corner sliding (fcn.0041ec84)
-//   - multi-direction input prefers open directions (fcn.0041e61e)
+//   - multi-direction input prefers open directions (fcn.0041e61e), then the one pressed last
 //   - kick (#300 speed), punch/throw (#301 speed, #660/#661 arcs), stop-kicked-bomb on ACTION
 //   - trigger bombs detonate oldest first (fcn.00424b41)
 //   - enclosement spiral, one block every 250 ms after HURRY (fcn.00426818)
@@ -53,6 +53,7 @@
   const PW_AMOUNT = []; for (let i = 0; i < 13; i++) PW_AMOUNT.push(V(400 + i, 0));
 
   const idx = (x, y) => y * COLS + x;
+  const DIR_BIT = [AB.IN.UP, AB.IN.RIGHT, AB.IN.DOWN, AB.IN.LEFT];   // directions 0..3 as input bits
 
   const STATE_SKIP = new Set(['cfg', 'S', 'scheme', 'rng', 'events', 'camp']);
 
@@ -194,6 +195,7 @@
         special: 0, specialT: 0,            // 1 kick, 2 punch, 3 stunned, 4 pickup, 5 trampoline, 6 warp-out, 7 warp-in, 20+ cornerhead
         cornerN: 0, held: -1, stunT: 0,
         prevIn: 0, inBits: 0, poopsGrabAt: 0,
+        dirAt: [0, 0, 0, 0],                // the tick each direction (up, right, down, left) was pressed, 0 while not held
         idleT: 0, idleN: pc.slot | 0,       // standing-still timer for the idle animations (cosmetic)
         kills: 0, awesomeCount: 0, tramp: null, warp: null,
         warpLock: -1,                       // the warp just arrived at: it can't send you on until you've left its tile
@@ -281,6 +283,9 @@
         if ((bits & AB.IN.FORFEIT) && !p.isAI) { if (p.alive && this.state === 'play') { this.killPlayer(p, -1, true); this.ev({ t: 'forfeit', slot: p.slot }); } bits = 0; }
         if (p.isAI && AB.AI) bits = AB.AI.think(this, p);
         p.inBits = bits;
+        // when each direction held now was pressed (for chooseDir: the latest leads)
+        const at = p.dirAt || (p.dirAt = [0, 0, 0, 0]);
+        for (let d = 0; d < 4; d++) { const b = DIR_BIT[d]; at[d] = !(bits & b) ? 0 : (p.prevIn & b) && at[d] ? at[d] : this.tick; }
       }
       const live = this.state !== 'over';
       if (live) this.updateTimer();
@@ -444,26 +449,23 @@
       }
     }
 
-    // fcn.0041e61e: with several directions held, keep only those leading to open cells, take the last
+    // fcn.0041e61e: with several directions held, keep only those leading to open cells. Of those the
+    // original takes the last in its order (up, right, down, left); here the one pressed most recently
+    // leads, so holding up, then left as well, goes left, and letting go of left goes back to up. (Keys
+    // pressed on the same tick: the original's order.)
     chooseDir(p, bits) {
       const want = [!!(bits & AB.IN.UP), !!(bits & AB.IN.RIGHT), !!(bits & AB.IN.DOWN), !!(bits & AB.IN.LEFT)];
       const cnt = want.filter(Boolean).length;
       if (!cnt) return -1;
-      const cx = AB.cellX(p.x), cy = AB.cellY(p.y);
       if (cnt > 1) {
+        const cx = AB.cellX(p.x), cy = AB.cellY(p.y);
         let open = 0;
         for (let d = 0; d < 4; d++) if (want[d] && this.free(cx + DX[d], cy + DY[d])) open++;
         if (open) for (let d = 0; d < 4; d++) if (want[d] && !this.free(cx + DX[d], cy + DY[d])) want[d] = false;
-        // prefer continuing the current direction when it is still wanted (smoother cornering)
-        if (want[p.dir] && p.moving && cnt === 2 && open === 2) {
-          const other = [0, 1, 2, 3].find(d => d !== p.dir && want[d]);
-          const ox = AB.offX(p.x), oy = AB.offY(p.y);
-          if (other !== undefined && ((DX[other] && ox === 0) || (DY[other] && oy === 0))) return other;
-          return p.dir;
-        }
       }
+      const at = p.dirAt || [0, 0, 0, 0];
       let r = -1;
-      for (let d = 0; d < 4; d++) if (want[d]) r = d;
+      for (let d = 0; d < 4; d++) if (want[d] && (r < 0 || at[d] >= at[r])) r = d;
       return r;
     }
 
