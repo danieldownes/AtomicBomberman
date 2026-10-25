@@ -82,7 +82,9 @@
     '   heard. The voices have their own volume in Voice and sound.',
     ' - Voice chat in the room menu: on or off, the microphone, the',
     '   voice gate (sends only while you speak; set its level with the',
-    '   meter), the volume of everyone and of each person.',
+    '   meter), the volume of everyone and of each person, and "Lower',
+    '   game for voices": how far your game goes down while someone',
+    '   else talks (off to start with).',
     ' - "Keep game sounds out" lets the browser cancel the game sounds',
     '   from your microphone like the voices. Headphones are best.',
     ' - Voices go straight between the computers (or through the relay',
@@ -768,7 +770,7 @@
       switch (row.k) {
         case 'sfx': { const S = AB.settings; S.sfxVolume = AB.clamp(Math.round(S.sfxVolume * 10 + d) / 10, 0, 1); A.setVolumes(AB.musicMuted ? 0 : S.musicVolume, S.sfxVolume); AB.saveSettings(); A.playRange(400, 499); return; }
         case 'music': { const S = AB.settings; S.musicVolume = AB.clamp(Math.round(S.musicVolume * 10 + d) / 10, 0, 1); A.setVolumes(AB.musicMuted ? 0 : S.musicVolume, S.sfxVolume); AB.saveSettings(); break; }
-        case 'duck': c.duck = !c.duck; V.save(); break;
+        case 'duck': c.duck = AB.clamp((c.duck | 0) + d, 0, 10); V.save(); break;
         case 'on': c.on = !c.on; V.save(); if (c.on && (NP.room || this.preview)) V.start(); else V.stop(); break;
         case 'mic':
           if (V.mic === 'live') V.toggleMute();
@@ -807,7 +809,7 @@
         switch (row.k) {
           case 'sfx': L('Game sound volume', Math.round(AB.settings.sfxVolume * 10) + ' / 10'); break;
           case 'music': L('Game music volume', Math.round(AB.settings.musicVolume * 10) + ' / 10' + (AB.musicMuted ? '  (M: muted)' : '')); break;
-          case 'duck': L('Quieter game while others talk', c.duck ? 'On' : 'Off'); break;
+          case 'duck': L('Lower game for voices', c.duck > 0 ? c.duck + ' / 10' : 'Off', c.duck > 0 ? CYAN : GREY); break;
           case 'on': L('Voice chat', c.on ? 'On' : 'Off'); break;
           case 'mic': L('Microphone', V.mic === 'live' ? (V.muted ? 'Muted (V)' : 'On') : (MIC_TEXT[V.mic] || V.mic), V.mic === 'live' && !V.muted ? CYAN : ORANGE);
             if (sel && V.mic !== 'live') G.text(ctx, 'Enter: ask again', 590, y + 2, GREY, 'font0', 2); break;
@@ -835,7 +837,9 @@
           case 'done': G.text(ctx, NP.room ? 'Back to the room' : 'Back to the lobby', 70, y, col, 'font1'); break;
         }
       });
+      const sk = rows[this.sel] && rows[this.sel].k;
       const tip = V.mic === 'denied' ? 'Your browser blocked the microphone: allow it in the address bar, then Enter on Microphone. You still hear the others.'
+        : sk === 'duck' ? 'While someone else talks, your game goes down this far: more each step, 10 nearly silent.'
         : 'Headphones sound clearest. Others hear you while the level bar is green.';
       G.text(ctx, fit('The game volumes leave the voices as they are; + / - change them anywhere.', 560, 'font0'), 320, 380, GREY, 'font0', 1);
       G.text(ctx, fit(tip, 560, 'font0'), 320, 398, GREY, 'font0', 1);

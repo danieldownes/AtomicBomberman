@@ -16,14 +16,19 @@
 (function (AB) {
   const V = AB.voice = {};
   const now = () => performance.now();
-  const DEF = { on: true, gate: true, gateLevel: 5, volume: 8, vols: {}, deviceId: '', echoSafe: true, duck: true };
-  const DUCK = 0.3;      // the game's sound and music while someone else talks (with "duck" on)
+  const DEF = { on: true, gate: true, gateLevel: 5, volume: 8, vols: {}, deviceId: '', echoSafe: true, duck: 0 };
+  // "Lower game for voices" (duck): 0 off .. 10, how far the game's sound and music go down while
+  // someone else talks, 3 dB more each step (3: about a third of the volume, 10: nearly silent).
+  // When someone talks is up to them: their voice gate opens (js/netplay.js tells the room).
+  V.duckFactor = (n) => (n > 0 ? Math.pow(10, -3 * AB.clamp(n | 0, 0, 10) / 20) : 1);
   V.cfg = function () {
     const S = AB.settings;
     if (!S.voice || typeof S.voice !== 'object') S.voice = {};
     const v = S.voice;
     for (const k in DEF) if (v[k] === undefined) v[k] = k === 'vols' ? {} : DEF[k];
     if (!v.vols || typeof v.vols !== 'object') v.vols = {};
+    // (it was on or off, and on by default: now off, a number)
+    if (typeof v.duck !== 'number') v.duck = 0;
     return v;
   };
   V.save = () => AB.saveSettings();
@@ -128,7 +133,7 @@
     const open = V.mic === 'live' && !V.muted && (!c.gate || t - lastLoud < 450);
     // someone else talking: the game goes quieter, back up half a second after they stop
     if (Object.keys(V.talking).length) lastHeard = t;
-    AB.audio.setDuck(c.duck && t - lastHeard < 500 ? DUCK : 1);
+    AB.audio.setDuck(c.duck > 0 && t - lastHeard < 500 ? V.duckFactor(c.duck) : 1);
     if (open !== V.open) {
       V.open = open;
       // quick to open, a little softer to close
