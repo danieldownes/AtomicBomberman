@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Seamless music loops: package the looped tracks as scripts, and (re)measure their loop points.
 
-Some tracks end by repeating their opening bars, so looping the whole file plays those bars twice.
+Some tracks end by repeating their opening bars, so looping the whole file plays those bars twice
+(the end-of-round tracks, WHOLE, loop whole).
 js/audio.js loops them through Web Audio up to where the opening comes round again
 (AB.audio.MUSIC_LOOPS). Web Audio needs the file's bytes: over http the game fetches the .mp3, but a
 page opened from disk (file://) may not fetch, so each looped track also comes as a script,
@@ -17,6 +18,7 @@ import base64, os, subprocess, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MUSIC = os.path.join(ROOT, 'web', 'audio', 'music')
 LOOPED = ['menu', 'battle', 'pyramid', 'sewer']        # keep in step with AB.audio.MUSIC_LOOPS
+WHOLE = ['lose', 'draw', 'win']                         # loop the whole track (Infinity there)
 
 
 def wrap(name):
@@ -48,10 +50,10 @@ def measure(name):
 
 
 if __name__ == '__main__':
-    for name in LOOPED:
+    for name in LOOPED + WHOLE:
         out, size = wrap(name)
         line = f'{name:8s} -> {os.path.relpath(out, ROOT)} ({size // 1024} KB)'
-        if '--measure' in sys.argv:
+        if '--measure' in sys.argv and name in LOOPED:
             t, c = measure(name)
             line += f'   opening recurs at {t:.6f} s ({c:.3f} alike)'
         print(line)

@@ -338,8 +338,11 @@
   // without a click. (Times in seconds of the decoded track.) Over http the game fetches the .mp3;
   // opened from disk it loads the same track from audio/music/<name>.js (see trackBytes).
   // tools/build_music_loops.py writes those scripts, and --measure finds these times again.
-  A.MUSIC_LOOPS = { menu: 26.865488, battle: 129.642177, pyramid: 116.321179, sewer: 107.047528 };
-  const loopCache = new Map();               // name -> loop buffer (just the menu's: the rest are long)
+  A.MUSIC_LOOPS = { menu: 26.865488, battle: 129.642177, pyramid: 116.321179, sewer: 107.047528,
+    // the end-of-round tracks (results, draw, match won) run from their last note straight into
+    // their first, so the whole track loops: no gap, and no fresh start each time round
+    lose: Infinity, draw: Infinity, win: Infinity };
+  const loopCache = new Map();               // name -> loop buffer (the short ones: menu, results, draw, win)
   let wl = null;                             // the Web Audio loop playing: { name, src }
   const canFetch = () => !!window.fetch && location.protocol !== 'file:';
   // the track's bytes. Opened from disk (file://) the browser won't fetch, so these tracks also come as
@@ -382,7 +385,7 @@
     if (loopCache.has(name)) { go(loopCache.get(name)); return; }
     trackBytes(name)
       .then(b => ctx.decodeAudioData(b))
-      .then((buf) => { const lb = makeLoop(buf, A.MUSIC_LOOPS[name]); if (name === 'menu') loopCache.set(name, lb); go(lb); })
+      .then((buf) => { const lb = makeLoop(buf, A.MUSIC_LOOPS[name]); if (lb.duration < 40) loopCache.set(name, lb); go(lb); })
       .catch((e) => {
         console.warn('music loop:', name, e.message);
         if (wl === tok && musicName === name) { wl = null; if (!music) elementMusic(name, true); }

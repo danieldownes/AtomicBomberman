@@ -302,7 +302,7 @@
 
   SC.register('campdone', {
     enter() {
-      this.t = 0; A.music('win', false); A.playRange(2000, 2299);
+      this.t = 0; A.music('win', true); A.playRange(2000, 2299);
       const M = AB.match, human = M && M.players.find(p => !p.ai);
       this.colors = AB.victory.contestants(M, human ? { p: human } : null);
       AB.victory.load(true);

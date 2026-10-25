@@ -206,7 +206,9 @@ These are under main menu > Options, next to the original settings.
   round again (cross-correlating the opening with the end: 0.93-0.99 alike) and loops just the
   part before it, through Web Audio, with the first 20 ms blended in from what followed the cut so
   there is no click (`AB.audio.MUSIC_LOOPS` in js/audio.js). Opened from disk (file://), where the
-  browser won't fetch files, the same tracks load from `audio/music/<name>.js` instead.
+  browser won't fetch files, the same tracks load from `audio/music/<name>.js` instead. The
+  end-of-round tracks (results, draw, match won) run from their last note straight into their
+  first, so they loop whole, the same way, for as long as the screen stays up.
 * **Sounds & Voices** is a browser for every sound, including the roughly 1,050 recordings on
   the CD that the game never used. It has three levels:
   * game events, such as "Taunt after a kill" or "Explosion";
@@ -248,6 +250,15 @@ These are under main menu > Options, next to the original settings.
   * The lettering copies the style of the original's HURRY!! picture. The CD has no letters in that
     style, so it uses Anton, a free font (SIL Open Font License) embedded in `data/titlefont.js`.
   * In network games the host's setting applies.
+* **Closing walls you can see coming** (Enclosement Depth): each block drops straight down from
+  above, larger and fading in, its shadow growing on the floor beneath, and lands with a thud, a
+  flash and a puff of dust. A block landing on a block already there (an arena walled all round)
+  thuds too and sends rock chips flying, so the walls are seen and heard closing in all the way
+  round.
+* **Demo (attract mode)**: left alone on the main menu, the game plays a round of computer
+  players. It follows Options (arenas, schemes, play time, closing walls, sounds) instead of a fixed
+  90-second round on the default arenas, and loads like any round, so it gets its own sounds and,
+  in HD, its arena's art. Any key goes back to the menu.
 * **Graphics**
   * *Enhanced*: soft sprite edges, translucent shadows and glowing flames. These are derived
     when the game loads.

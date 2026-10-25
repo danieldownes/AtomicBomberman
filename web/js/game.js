@@ -55,6 +55,23 @@
   const idx = (x, y) => y * COLS + x;
 
   const STATE_SKIP = new Set(['cfg', 'S', 'scheme', 'rng', 'events', 'camp']);
+
+  // one step along the closing walls' clockwise spiral, ring by ring inwards (e: the enclosement state)
+  function encAdvance(e) {
+    for (let guard = 0; guard < 8; guard++) {
+      const nx = e.x + DX[e.dir], ny = e.y + DY[e.dir];
+      if (nx >= COLS - e.ring || ny >= ROWS - e.ring || nx < e.ring || ny < e.ring + (e.dir === 0 ? 1 : 0)) {
+        e.dir = (e.dir + 1) & 3;
+        if (e.dir === 1) {
+          e.ring++;
+          if (e.ring >= e.depth || e.ring * 2 >= ROWS) { e.done = true; return; }
+          e.x = e.ring; e.y = e.ring; return;
+        }
+        continue;
+      }
+      e.x = nx; e.y = ny; return;
+    }
+  }
   class Game {
     // cfg: {settings, scheme(obj), level, seed, players:[{slot,color,team,ai:boolean,name}], match:{wins:[],kills:[]}}
     constructor(cfg) {
@@ -66,6 +83,8 @@
       this.scheme = cfg.scheme;
       this.tiles = new Uint8Array(N);
       this.brickT = new Int16Array(N);          // >0 while a brick disintegrates
+      this.slamAt = new Int32Array(N).fill(-1e9);   // tick a closing-in block last landed there (for drawing)
+      this.slamOnBlock = new Uint8Array(N);          // ... and whether it landed on a block already there
       this.hidden = new Int8Array(N).fill(-1);  // powerup hidden under a brick
       this.items = new Int8Array(N).fill(-1);   // powerup lying on the floor
       this.itemSafe = new Int16Array(N);        // ticks a revealed item is immune to the flame that revealed it
@@ -1043,24 +1062,24 @@
       if (++e.t < this.encEvery()) return;
       e.t = 0;
       this.slam(e.x, e.y);
-      // advance along the clockwise spiral
-      for (let guard = 0; guard < 8; guard++) {
-        const nx = e.x + DX[e.dir], ny = e.y + DY[e.dir];
-        if (nx >= COLS - e.ring || ny >= ROWS - e.ring || nx < e.ring || ny < e.ring + (e.dir === 0 ? 1 : 0)) {
-          e.dir = (e.dir + 1) & 3;
-          if (e.dir === 1) {
-            e.ring++;
-            if (e.ring >= e.depth || e.ring * 2 >= ROWS) { e.done = true; return; }
-            e.x = e.ring; e.y = e.ring; return;
-          }
-          continue;
-        }
-        e.x = nx; e.y = ny; return;
-      }
+      encAdvance(e);
+    }
+    // the next n blocks of the closing walls and how many ticks until each lands (for drawing them
+    // falling: js/render.js). Doesn't change the game.
+    encUpcoming(n) {
+      const e = this.enc, out = [];
+      if (!e || e.done || this.state !== 'play') return out;
+      const c = { x: e.x, y: e.y, dir: e.dir, ring: e.ring, depth: e.depth, done: false }, every = this.encEvery();
+      for (let k = 0; k < n && !c.done; k++) { out.push({ x: c.x, y: c.y, in: every - e.t + k * every }); encAdvance(c); }
+      return out;
     }
     slam(x, y) {
       const i = idx(x, y);
-      if (this.tiles[i] === T_SOLID && this.brickT[i] <= 0) return;
+      this.slamAt[i] = this.tick;
+      // a block lands on a block that's already there too (an arena walled all round): it thuds the
+      // same (and chips fly: js/render.js), so the walls are heard closing in all the way round
+      this.slamOnBlock[i] = this.tiles[i] === T_SOLID && this.brickT[i] <= 0 ? 1 : 0;
+      if (this.slamOnBlock[i]) { this.snd(141, 146); return; }
       this.tiles[i] = T_SOLID; this.brickT[i] = 0; this.hidden[i] = -1; this.items[i] = -1; this.extras[i] = null;
       this.snd(141, 146);
       this.ev({ t: 'slam', x, y });

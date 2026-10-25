@@ -372,7 +372,7 @@
     },
     tick() {
       // attract mode after #92 seconds of idling
-      if (!this.loadingHD && ++this.idle > AB.val(92, 30) * AB.TPS && AB.val(92, 30) >= 5) SC.go('game', { demo: true });
+      if (!this.loadingHD && ++this.idle > AB.val(92, 30) * AB.TPS && AB.val(92, 30) >= 5) startDemo();
     },
     render(ctx) {
       G.blit(ctx, 'mainmenu-clean', 0, 0);
@@ -593,6 +593,14 @@
     AB.nextBonus = null;
     nextRound();
   }
+  // attract mode: computer players only, on the arenas, schemes and rules set in Options (play time,
+  // closing walls...), through the loading screen like any round, so it gets its own sounds and, in
+  // HD, its arena's art. Any key goes back to the main menu.
+  function startDemo() {
+    AB.match = { wins: {}, kills: {}, round: 1, players: demoPlayers(), demo: true };
+    const level = AB.pickArena(AB.settings), scheme = AB.pickScheme(AB.settings);
+    SC.go('glue', { level, scheme, then: () => SC.go('game', { level, scheme }) });
+  }
   function demoPlayers() {
     const n = 4 + Math.floor(Math.random() * 4);
     return Array.from({ length: n }, (_, i) => ({ slot: i, color: i, team: i % 2, ai: true, control: 'ai', name: 'Player ' + (i + 1) }));
@@ -633,6 +641,8 @@
     },
     // go on once the picture and the effects are in, plus up to 6 s for the voices (90 s at most, so a
     // dead connection can't hang the game); a network round then waits until the host says go
+    // a demo (attract mode) goes back to the main menu on any key, while loading too
+    key() { if (AB.match && AB.match.demo) SC.go('mainmenu'); },
     tick() {
       this.t++;
       const must = this.img && this.fx;
@@ -663,7 +673,6 @@
       if (!AB.match) startMatch();
       const M = AB.match;
       const S = Object.assign({}, AB.settings);
-      if (M.demo) { S.playTime = 90; S.arenas = {}; }
       // network round: the host decided arena, seed and settings (js/netscreens.js)
       const net = this.net = arg.net || null;
       S.countdown = AB.settings.countdown !== false;          // Options > Round Start Countdown
@@ -919,7 +928,7 @@
 
   // ================================================================= DRAW / RESULTS / VICTORY
   SC.register('draw', {
-    enter() { this.t = 0; chatMusic('draw', false); A.playRange(1700, 1999, 1, AB.match && AB.match.net ? AB.match.soundSeed + ':draw' : undefined); },
+    enter() { this.t = 0; chatMusic('draw', true); A.playRange(1700, 1999, 1, AB.match && AB.match.net ? AB.match.soundSeed + ':draw' : undefined); },
     key(k) { if (this.t > 30 && (isOK(k) || isBack(k))) SC.go('results'); },
     tick() { if (++this.t > AB.TPS * 6) SC.go('results'); },
     render(ctx) { G.blit(ctx, 'draw', 0, 0); },
@@ -958,9 +967,9 @@
 
   AB.matchWinner = () => matchWinner();
   SC.register('results', {
-    enter() { this.t = 0; chatMusic('lose', false); this.winner = matchWinner(); this.pick = null; },
+    enter() { this.t = 0; chatMusic('lose', true); this.winner = matchWinner(); this.pick = null; },
     // network match: M mutes the music of the room and results screens (to chat), not the game's
-    get musicKey() { return AB.match && AB.match.net ? () => AB.netmatch.toggleChatMusic() : null; },
+    get musicKey() { return AB.match && AB.match.net ? () => AB.netmatch.toggleChatMusic('lose') : null; },
     key(k) {
       if (this.t < 30) return;
       if (AB.match && AB.match.net) {
@@ -1050,7 +1059,7 @@
       this.w = w; this.t = 0;
       this.colors = AB.victory.contestants(AB.match, w, MS());
       AB.victory.load(true);
-      chatMusic('win', false); A.playRange(2000, 2299, 1, AB.match && AB.match.net ? AB.match.soundSeed + ':win' : undefined);
+      chatMusic('win', true); A.playRange(2000, 2299, 1, AB.match && AB.match.net ? AB.match.soundSeed + ':win' : undefined);
       AB.match.over = true;
     },
     key(k) {

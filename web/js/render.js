@@ -9,6 +9,30 @@
   // anchors: tiles/items/bombs use the cell's bottom-centre with the frame hotspot (no sequence
   // offsets), flames and bombermen use the cell centre + the per-state offsets stored in the .ANI.
   const cellL = (x) => OX + x * CW, cellT = (y) => OY + y * CH;
+  const FALL = 20, LAND = 12, CHIPS = 32;   // ticks: a closing-in block's fall, its landing flash and dust, flying chips
+  const CHIP_COL = ['#2c2824', '#5e574d', '#8e8475', '#c9bfae', '#e6dccb'];
+  function drawChips(ctx, L) {
+    const { x, y, cx, cy, age } = L, a = Math.min(1, 2 * (1 - age / CHIPS));
+    let s = (x * 73856093) ^ (y * 19349663) ^ 0x5bd1e995;          // the same chips every frame
+    const rnd = () => { s = (Math.imul(s, 1103515245) + 12345) | 0; return ((s >>> 8) & 0xffff) / 0x10000; };
+    ctx.save(); ctx.globalAlpha = a; ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+    for (let k = 0; k < 28; k++) {
+      const ang = rnd() * Math.PI * 2, sp = 1.4 + rnd() * 2.8, up = 2.2 + rnd() * 3.4, sz = 2.5 + rnd() * 4.5, spin = (rnd() - 0.5) * 0.7;
+      const px = cx + Math.cos(ang) * (8 + sp * age), py = cy + 4 + Math.sin(ang) * 8 - up * age + 0.2 * age * age;
+      ctx.save(); ctx.translate(px, py); ctx.rotate(spin * age + ang);
+      // an irregular chip: a lopsided four-sided shard
+      ctx.beginPath(); ctx.moveTo(-sz / 2, -sz * 0.3); ctx.lineTo(sz * 0.2, -sz / 2); ctx.lineTo(sz / 2, sz * 0.15); ctx.lineTo(-sz * 0.1, sz * 0.4); ctx.closePath();
+      ctx.fillStyle = CHIP_COL[k % CHIP_COL.length]; ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+    // and a cloud of dust that rises and spreads
+    ctx.fillStyle = 'rgb(205,195,178)';
+    for (let k = 0; k < 5; k++) {
+      const ang = rnd() * Math.PI * 2, d = 6 + age * 0.9;
+      ctx.globalAlpha = 0.35 * a; ctx.beginPath(); ctx.arc(cx + Math.cos(ang) * d, cy - age * 0.5 + Math.sin(ang) * d * 0.5, 5 + age * 0.45, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
   const bottomX = (x) => cellL(x) + 20, bottomY = (y) => cellT(y) + 35;
 
   // "Classic" arena (port addition): CLASSICS.ANI players/icons + 8-bit tiles, bombs and flames
@@ -77,6 +101,32 @@
       } else if (tt === 1) AB.tilesets.draw(ctx, lvl, 'solid', 0, bottomX(x), bottomY(y));
       else if (tt === 2) AB.tilesets.draw(ctx, lvl, 'brick', 0, bottomX(x), bottomY(y));
     }
+    // the closing walls: a shadow growing under each block about to land, and a flash and a puff of
+    // dust where one just has
+    const falling = g.encUpcoming ? g.encUpcoming(8).filter(u => u.in <= FALL) : [];
+    for (const u of falling) {
+      const p = 1 - u.in / FALL, q = p * p, w = 40 * (0.45 + 0.55 * q), h = 30 * (0.45 + 0.55 * q);
+      ctx.save(); ctx.globalAlpha = 0.7 * p; ctx.fillStyle = '#000';
+      ctx.beginPath(); ctx.ellipse(cellL(u.x) + 20, cellT(u.y) + 20, w / 2, h / 2, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    }
+    const landed = [];
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const i = idx(x, y), age = g.tick - g.slamAt[i], onBlock = g.slamOnBlock && g.slamOnBlock[i];
+      if (age < 0 || age >= (onBlock ? CHIPS : LAND)) continue;
+      const cx = cellL(x) + 20, cy = cellT(y) + 18;
+      ctx.save();
+      if (age < LAND) {
+        const a = 1 - age / LAND;
+        ctx.globalAlpha = 0.45 * a; ctx.fillStyle = '#fff'; ctx.fillRect(cellL(x), cellT(y), 40, 36);
+        ctx.fillStyle = 'rgba(200,190,170,1)';
+        for (let k = 0; k < 6; k++) {
+          const ang = (k / 6) * Math.PI * 2 + (x * 7 + y * 3) % 6, d = 18 + age * 1.6;
+          ctx.globalAlpha = 0.55 * a; ctx.beginPath(); ctx.arc(cx + Math.cos(ang) * d, cy + 14 + Math.sin(ang) * d * 0.45, 2.5 + age * 0.35, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      ctx.restore();
+      if (onBlock) landed.push({ x, y, cx, cy, age });
+    }
     // powerups on the floor
     for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
       const it = g.items[idx(x, y)];
@@ -127,6 +177,18 @@
     }
     sprites.sort((a, b) => a.y - b.y);
     for (const s of sprites) s.fn();
+    // the closing walls' blocks dropping in: bigger and fainter the higher they are, landing on the tick
+    // the game sets the block (on an empty cell, a brick, or a block already there)
+    for (const u of falling) {
+      const p = 1 - u.in / FALL, q = p * p, sc = 1 + 0.6 * (1 - q), lift = 72 * (1 - q);
+      const cx = cellL(u.x) + 20, cy = cellT(u.y) + 18;
+      ctx.save(); ctx.globalAlpha = Math.min(1, p * 1.8);
+      ctx.translate(cx, cy - lift); ctx.scale(sc, sc);
+      AB.tilesets.draw(ctx, lvl, 'solid', 0, 0, 17);
+      ctx.restore();
+    }
+    // a block that landed on a block: chips of rock fly up and out, tumbling, and fall back
+    for (const L of landed) drawChips(ctx, L);
     ctx.imageSmoothingEnabled = smooth;
     drawHud(ctx, g, t);
     if (g.hurryShown > 0 && Math.floor(g.hurryShown / 8) % 2 === 0) G.draw(ctx, 'hurry', 0, 320, 260, -1, false);
