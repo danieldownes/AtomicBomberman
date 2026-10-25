@@ -929,9 +929,13 @@
   // ================================================================= DRAW / RESULTS / VICTORY
   SC.register('draw', {
     enter() { this.t = 0; chatMusic('draw', true); A.playRange(1700, 1999, 1, AB.match && AB.match.net ? AB.match.soundSeed + ':draw' : undefined); },
-    key(k) { if (this.t > 30 && (isOK(k) || isBack(k))) SC.go('results'); },
-    tick() { if (++this.t > AB.TPS * 6) SC.go('results'); },
-    render(ctx) { G.blit(ctx, 'draw', 0, 0); },
+    // stays (its music looping) until someone presses: no timeout
+    key(k) { if (this.t > 30 && (isBomb(k) || isBack(k) || k.pad !== undefined)) SC.go('results'); },
+    tick() { this.t++; },
+    render(ctx) {
+      G.blit(ctx, 'draw', 0, 0);
+      if (this.t > 30 && blink()) { panel(ctx, 200, 432, 240, 22, 0.6); centerText(ctx, 'Press bomb to continue', 437, WHITE, 'font0'); }
+    },
   });
 
   // the jingles between network rounds follow the room's music switch (js/netscreens.js toggleChatMusic)
