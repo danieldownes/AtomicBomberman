@@ -295,7 +295,14 @@
       if (this.t > 15) this.finish();
     },
     tick() { this.t++; },
-    finish() { if (this.done) return; this.done = true; SC.go('title'); },
+    // sound is allowed once the movie played with it, or after a key or click: then the title page
+    // starts with its music straight away instead of waiting for a key
+    finish() {
+      if (this.done) return; this.done = true;
+      const v = this.v, heard = v && !v.muted && v.currentTime > 0.5;
+      const active = navigator.userActivation ? navigator.userActivation.hasBeenActive : false;
+      SC.go('title', { sound: heard || active });
+    },
     leave() {
       const v = this.v; if (!v) return;
       v.onended = v.onerror = null; v.removeEventListener('click', this.onClick);
@@ -306,13 +313,21 @@
   });
 
   // ================================================================= LOGOS
+  // The Interplay and Hudson logos wait for a key while the browser hasn't allowed sound yet (it needs
+  // a key or click first); then, or straight after the intro movie when it had sound, the title page
+  // with its music (SOUNDLST 1000, "title page music") and "Atomic Bomberman!", then the main menu.
   SC.register('title', {
-    enter() { this.t = 0; this.stage = 0; this.waiting = true; },
+    enter(a) {
+      this.t = 0; this.stage = 0; this.waiting = true;
+      if (a && a.sound) { A.unlock(); this.start(); }
+    },
+    start() {
+      this.waiting = false; this.stage = 2; this.t = 0;
+      A.music('title'); (AB.menuSounds || Promise.resolve()).then(() => A.playRange(2800, 2899));
+    },
     key(k) {
       A.unlock();
-      const intro = () => { A.music('title'); (AB.menuSounds || Promise.resolve()).then(() => A.playRange(2800, 2899)); };
-      if (this.waiting) { this.waiting = false; this.stage = 2; this.t = 0; intro(); return; }
-      if (this.stage < 2) { this.stage = 2; this.t = 0; intro(); return; }
+      if (this.waiting || this.stage < 2) { this.start(); return; }
       A.play(10); SC.go('mainmenu');
     },
     tick() {
@@ -448,9 +463,11 @@
   SC.register('players', {
     help: 'input',
     textEntry: true,             // letters type names here (so M doesn't mute the music on this screen)
+    // the original's "music for input selection" (SOUNDLST 1020) is WIN, looping (js/audio.js);
+    // the match options after it keep it going, and the main menu brings MENU back
     enter() {
       this.sel = 0; this.err = null; this.errT = 0; this.cPresses = 0;
-      A.music('menu');
+      A.music('win');
       if (AB.settings.assignKeyboard && !AB.setup.some(s => s.control.startsWith('key'))) AB.setup[0].control = 'key0';
     },
     key(k) {
