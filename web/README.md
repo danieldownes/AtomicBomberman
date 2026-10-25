@@ -68,6 +68,11 @@ Other keys:
   chat). Not while typing a name, and not in a round if a player's keys use them.
 * F11: fullscreen
 
+In the menus, holding Up/Down (or a gamepad's stick) moves once, then after a moment keeps
+moving, stopping at the end of a list (a single press goes round from the last item to the
+first). The long lists (Options, Schemes, Sounds & Voices, Gameplay Music, the manual) also take
+PgUp/PgDn and Home/End, glide as they scroll, and show a scrollbar when they don't fit.
+
 ## Campaign Mode
 
 The original has a hidden single-player campaign: pressing C five times on its Player Setup screen

@@ -36,9 +36,24 @@
   SC.start = SC.go;
   SC.name = () => curName;
   SC.current = () => cur;
+  // Holding Up/Down/PgUp/PgDn (a key, or a gamepad's stick or d-pad) in a menu: one move, a short
+  // pause, then a steady stream of moves (presses marked `repeat`). A held key doesn't wrap round from
+  // the last row to the first: lists made with ListView stop at the ends themselves, and for the
+  // simpler menus a repeat that would wrap their `sel` round is undone here.
+  const REPEAT = ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'], REPEAT_DELAY = 24, REPEAT_EVERY = 4;   // ticks
+  const heldFor = {};
+  function repeats() {
+    const out = [];
+    for (const c of REPEAT) {
+      if (!I.held || !I.held(c) || curName === 'game') { heldFor[c] = 0; continue; }
+      const t = heldFor[c] = (heldFor[c] || 0) + 1;
+      if (t >= REPEAT_DELAY && (t - REPEAT_DELAY) % REPEAT_EVERY === 0) out.push({ code: c, repeat: true });
+    }
+    return out;
+  }
   SC.tick = function () {
     frame++;
-    const presses = I.takePresses();
+    const presses = I.takePresses().concat(repeats());
     for (const k of presses) {
       if (k.code === 'F1' && cur.help && !saved) { SC.pushHelp(cur.help); continue; }
       // in a match, keys used by a player's layout are game input, not shortcuts
@@ -57,7 +72,9 @@
       // time (to hear each other over voice chat, or the game over the room)
       const vol = VOLUME_KEYS[k.code];
       if (vol && !cur.textEntry && !playerKey) { SC.gameVolume(vol); continue; }
+      const was = k.repeat && typeof cur.sel === 'number' ? cur.sel : null;
       cur.key && cur.key(k);
+      if (was !== null && typeof cur.sel === 'number' && ((k.code === 'ArrowDown' && cur.sel < was) || (k.code === 'ArrowUp' && cur.sel > was))) cur.sel = was;
     }
     cur.tick && cur.tick();
   };
@@ -99,6 +116,80 @@
     cur = saved.scr; curName = saved.name; saved = null;
     I.takePresses();
   };
+
+  // ---------------------------------------------------------------- scrolling lists
+  // The long menus share this. Up/Down move the highlight (round from the last row to the first on a
+  // press; a held key stops at the ends), PgUp/PgDn a page, Home/End to the ends, skipping rows that
+  // can't be highlighted (headings). The list glides to keep the highlight in view, with a row of
+  // margin, and a scrollbar on the right shows where you are when the rows don't all fit. A list
+  // with no highlight (the manual's text) just scrolls. The screen keeps its own `sel`; it hands it
+  // to the list (lv.sel = this.sel) and takes it back after nav().
+  class ListView {
+    constructor() { this.sel = 0; this.top = 0; this.pos = 0; this.page = 10; this.at = 0; }
+    nav(k, n, skip) {
+      if (!n) return false;
+      const ok = (i) => !skip || !skip(i), from = this.sel;
+      const step = (d, wrap) => {
+        let i = this.sel;
+        for (let g = 0; g < n; g++) {
+          i += d;
+          if (i < 0 || i >= n) { if (!wrap) return false; i = (i + n) % n; }
+          if (ok(i)) { this.sel = i; return true; }
+        }
+        return false;
+      };
+      const land = (i, d) => { i = AB.clamp(i, 0, n - 1); while (!ok(i) && i + d >= 0 && i + d < n) i += d; if (ok(i)) this.sel = i; };
+      if (k.code === 'ArrowUp') return step(-1, !k.repeat);
+      if (k.code === 'ArrowDown') return step(1, !k.repeat);
+      if (k.code === 'PageUp') land(this.sel - Math.max(1, this.page - 1), -1);
+      else if (k.code === 'PageDown') land(this.sel + Math.max(1, this.page - 1), 1);
+      else if (k.code === 'Home') land(0, 1);
+      else if (k.code === 'End') land(n - 1, -1);
+      else return false;
+      if (this.sel === from && (k.code === 'PageUp' || k.code === 'PageDown')) land(k.code === 'PageUp' ? 0 : n - 1, k.code === 'PageUp' ? 1 : -1);
+      return this.sel !== from;
+    }
+    // no highlight: Up/Down a row, PgUp/PgDn (and Space) a page, Home/End
+    scroll(k, n) {
+      const max = Math.max(0, n - this.page), was = this.top;
+      if (k.code === 'ArrowDown') this.top++;
+      else if (k.code === 'ArrowUp') this.top--;
+      else if (k.code === 'PageDown' || k.code === 'Space') this.top += this.page - 1;
+      else if (k.code === 'PageUp') this.top -= this.page - 1;
+      else if (k.code === 'Home') this.top = 0;
+      else if (k.code === 'End') this.top = max;
+      else return false;
+      this.top = AB.clamp(this.top, 0, max);
+      return this.top !== was;
+    }
+    // draw the rows in view, at their gliding positions: drawRow(i, y) with row i's y as the screen had
+    // it (y0 + i * rowH when scrolled to the top), clipped to the list (from 8 px above its first row,
+    // for the cursor, to its last row); the scrollbar goes at barX.
+    draw(ctx, n, x, y0, w, rowH, page, drawRow, barX, noHighlight) {
+      this.page = page;
+      const max = Math.max(0, n - page), m = page > 5 ? 1 : 0;
+      if (!noHighlight) {
+        if (this.sel < this.top + m) this.top = this.sel - m;
+        if (this.sel > this.top + page - 1 - m) this.top = this.sel - page + 1 + m;
+      }
+      this.top = AB.clamp(this.top, 0, max);
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now(), dt = this.at ? Math.min(100, now - this.at) : 1e3;
+      this.at = now;
+      this.pos += (this.top - this.pos) * (1 - Math.exp(-dt / 60));
+      if (Math.abs(this.top - this.pos) < 0.005) this.pos = this.top;
+      const pos = this.pos;
+      ctx.save(); ctx.beginPath(); ctx.rect(x, y0 - 8, w, page * rowH + 6); ctx.clip();
+      for (let i = Math.max(0, Math.floor(pos)); i <= Math.min(n - 1, Math.ceil(pos + page) - 1); i++) drawRow(i, y0 + (i - pos) * rowH);
+      ctx.restore();
+      if (n > page && barX !== undefined) scrollbar(ctx, barX, y0 - 4, page * rowH, n, page, pos);
+    }
+  }
+  // a thin track with a handle as long as the share of rows in view
+  function scrollbar(ctx, x, y, h, n, page, pos) {
+    ctx.fillStyle = 'rgba(255,255,255,0.13)'; ctx.fillRect(x, y, 4, h);
+    const th = Math.max(12, h * page / n), ty = y + (h - th) * AB.clamp(pos / Math.max(1, n - page), 0, 1);
+    ctx.fillStyle = 'rgba(248,216,72,0.8)'; ctx.fillRect(x, ty, 4, th);
+  }
 
   // ---------------------------------------------------------------- helpers
   const isOK = (k) => k.code === 'Enter' || k.code === 'Space' || k.code === 'NumpadEnter';
@@ -170,7 +261,7 @@
   function blink() { return (frame >> 4) % 2 === 0; }
   // shared with the screens in js/screens2.js
   SC.uiLate = () => ({ arenaPreview, arenaSummary, startMatch, nextRound, activeSetup, controlOptions, controlLabel });
-  SC.ui = { YELLOW, WHITE, GREY, ORANGE, CYAN, isOK: (k) => isOK(k), isBack: (k) => isBack(k), isBomb: (k) => isBomb(k), panel, glue, glueDim, menuCursor, f1Hint,
+  SC.ui = { YELLOW, WHITE, GREY, ORANGE, CYAN, ListView, scrollbar, isOK: (k) => isOK(k), isBack: (k) => isBack(k), isBomb: (k) => isBomb(k), panel, glue, glueDim, menuCursor, f1Hint,
             centerText, drawTick, blink, miniHead, miniBomber, fmtTime, frame: () => frame };
 
   // ================================================================= INTRO MOVIE
@@ -1073,25 +1164,23 @@
     },
     key(k) {
       const items = this.items();
+      const lv = this.lv = this.lv || new ListView();
+      lv.sel = this.sel;
+      if (lv.nav(k, items.length)) { this.sel = lv.sel; return; }
       const it = items[this.sel];
-      if (k.code === 'ArrowUp') this.sel = (this.sel + items.length - 1) % items.length;
-      else if (k.code === 'ArrowDown') this.sel = (this.sel + 1) % items.length;
-      else if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight') && it.change) { it.change(k.code === 'ArrowLeft' ? -1 : 1); A.play(20); }
+      if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight') && it.change) { it.change(k.code === 'ArrowLeft' ? -1 : 1); A.play(20); }
       else if (isOK(k)) { if (it.action) it.action(); else if (it.change) { it.change(1); A.play(20); } }
       else if (isBack(k)) { AB.saveSettings(); SC.go('mainmenu'); }
     },
     render(ctx) {
       glueDim(ctx, 3);
       const l = AB.val(745, [55, 40, 22, 500]);
-      const items = this.items(), rows = 17;
-      this.top = AB.clamp(this.top || 0, Math.max(0, this.sel - rows + 1), Math.min(this.sel, Math.max(0, items.length - rows)));
-      for (let r = 0; r < rows && this.top + r < items.length; r++) {
-        const i = this.top + r, it = items[i], y = l[1] + r * l[2];
+      const items = this.items(), lv = this.lv = this.lv || new ListView();
+      lv.sel = this.sel;
+      lv.draw(ctx, items.length, 0, l[1], 600, l[2], 17, (i, y) => {
         if (i === this.sel) menuCursor(ctx, l[0] - 16, y + 17);
-        G.text(ctx, it.label, l[0], y, i === this.sel ? YELLOW : WHITE, 'font1');
-      }
-      if (this.top > 0) G.text(ctx, '...', l[0], l[1] - 18, GREY, 'font1');
-      if (this.top + rows < items.length) G.text(ctx, '...', l[0], l[1] + rows * l[2] - 6, GREY, 'font1');
+        G.text(ctx, items[i].label, l[0], y, i === this.sel ? YELLOW : WHITE, 'font1');
+      }, 606);
       G.text(ctx, 'Left/Right/Enter: change     Esc: back', 320, 418, GREY, 'font0', 1);
       f1Hint(ctx);
     },
@@ -1113,10 +1202,11 @@
     },
     close() { AB.saveSettings(); A.music('menu'); SC.go('settings'); },
     key(k) {
-      const rows = this.rows(), it = rows[this.sel];
-      if (k.code === 'ArrowUp') this.sel = (this.sel + rows.length - 1) % rows.length;
-      else if (k.code === 'ArrowDown') this.sel = (this.sel + 1) % rows.length;
-      else if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight') && it.change) { it.change(); A.play(20); }
+      const rows = this.rows(), lv = this.lv = this.lv || new ListView();
+      lv.sel = this.sel;
+      if (lv.nav(k, rows.length)) { this.sel = lv.sel; this.hold = 0; return; }
+      const it = rows[this.sel];
+      if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight') && it.change) { it.change(); A.play(20); }
       else if (isOK(k)) { if (it.action) it.action(); else if (it.change) it.change(); A.play(20); }
       else if (isBack(k)) this.close();
       this.hold = 0;
@@ -1131,8 +1221,10 @@
       panel(ctx, 40, 22, 560, 406, 0.55);
       centerText(ctx, 'GAMEPLAY MUSIC', 34, YELLOW);
       const S = AB.settings, rows = this.rows();
-      rows.forEach((it, i) => {
-        const y = 72 + i * 20, sel = i === this.sel;
+      const lv = this.lv = this.lv || new ListView();
+      lv.sel = this.sel;
+      lv.draw(ctx, rows.length, 44, 72, 552, 20, 17, (i, y) => {
+        const it = rows[i], sel = i === this.sel;
         if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.16)'; ctx.fillRect(48, y - 2, 544, 20); menuCursor(ctx, 66, y + 16); }
         let x = 84;
         if (it.track) {
@@ -1146,7 +1238,7 @@
             ctx.fillStyle = ORANGE; ctx.fillRect(560 + b * 6, y + 15 - h, 4, h);
           }
         }
-      });
+      }, 590);
       G.text(ctx, 'Up/Down: listen   Enter/Space: tick   Esc: back', 320, 412, GREY, 'font0', 1);
       f1Hint(ctx);
     },
@@ -1201,46 +1293,41 @@
       const H = window.AB_DATA.help;
       this.files = Object.keys(H).filter(k => k !== 'highmem' && k !== 'lowmem' && !k.startsWith('port')).sort();   // port* = the port's own pages, opened with F1
       this.file = a && a.file && H[a.file] ? a.file : null;
-      this.sel = 0; this.scroll = 0;
+      this.sel = 0; this.lv = new ListView(); this.text = new ListView(); this.text.page = 24;
     },
     key(k) {
       const H = window.AB_DATA.help;
       if (!this.file) {
-        if (k.code === 'ArrowUp') this.sel = (this.sel + this.files.length - 1) % this.files.length;
-        else if (k.code === 'ArrowDown') this.sel = (this.sel + 1) % this.files.length;
-        else if (isOK(k)) { this.file = this.files[this.sel]; this.scroll = 0; }
+        this.lv.sel = this.sel;
+        if (this.lv.nav(k, this.files.length)) { this.sel = this.lv.sel; return; }
+        if (isOK(k)) { this.file = this.files[this.sel]; this.text = new ListView(); this.text.page = 24; }
         else if (isBack(k)) { if (this.back === '__pop') SC.pop(); else SC.go(this.back); }
         return;
       }
-      const lines = H[this.file].split('\n').length;
-      if (k.code === 'ArrowDown') this.scroll = Math.max(0, Math.min(lines - 20, this.scroll + 1));
-      else if (k.code === 'ArrowUp') this.scroll = Math.max(0, this.scroll - 1);
-      else if (k.code === 'PageDown' || k.code === 'Space') this.scroll = Math.min(Math.max(0, lines - 20), this.scroll + 20);
-      else if (k.code === 'PageUp') this.scroll = Math.max(0, this.scroll - 20);
-      else if (isBack(k) || k.code === 'Enter') { if (this.back === '__pop') SC.pop(); else this.file = null; }
+      if (this.text.scroll(k, H[this.file].split('\n').length)) return;
+      if (isBack(k) || k.code === 'Enter') { if (this.back === '__pop') SC.pop(); else this.file = null; }
     },
     render(ctx) {
       glue(ctx, 5);
       panel(ctx, 16, 16, 608, 448, 0.82);
       if (!this.file) {
         centerText(ctx, AB.msg(600, 'Available help files:'), 40, YELLOW);
-        this.files.forEach((f, i) => {
-          const y = 80 + i * 26;
+        this.lv.sel = this.sel;
+        this.lv.draw(ctx, this.files.length, 24, 80, 592, 26, 13, (i, y) => {
           if (i === this.sel) menuCursor(ctx, 212, y + 17);
-          G.text(ctx, f.toUpperCase() + '.BM', 230, y, i === this.sel ? YELLOW : WHITE, 'font1');
-        });
+          G.text(ctx, this.files[i].toUpperCase() + '.BM', 230, y, i === this.sel ? YELLOW : WHITE, 'font1');
+        }, 612);
         return;
       }
       const lines = window.AB_DATA.help[this.file].replace(/\t/g, '    ').split('\n');
-      for (let i = 0; i < 25; i++) {
-        const s = lines[this.scroll + i];
-        if (s === undefined) break;
+      this.text.draw(ctx, lines.length, 24, 26, 592, 17, 24, (i, y) => {
+        const s = lines[i];
         const isHead = /^[*~=]/.test(s);
-        G.text(ctx, s.replace(/<IMG\w+>/g, '  '), 30, 26 + i * 17, isHead ? YELLOW : WHITE, 'font0', 0, false);
+        G.text(ctx, s.replace(/<IMG\w+>/g, '  '), 30, y, isHead ? YELLOW : WHITE, 'font0', 0, false);
         const m = /<IMG(\w+)>/.exec(s);
-        if (m) { const im = G.image(m[1].toLowerCase()); if (im.complete && im.naturalWidth) ctx.drawImage(im, 30, 26 + i * 17 - 2, 20, 18); }
-      }
-      G.text(ctx, 'Up/Down/PgUp/PgDn scroll   Esc: back', 320, 446, GREY, 'font0', 1);
+        if (m) { const im = G.image(m[1].toLowerCase()); if (im.complete && im.naturalWidth) ctx.drawImage(im, 30, y - 2, 20, 18); }
+      }, 612, true);
+      G.text(ctx, 'Up/Down, PgUp/PgDn, Home/End: scroll   Esc: back', 320, 446, GREY, 'font0', 1);
     },
   });
 

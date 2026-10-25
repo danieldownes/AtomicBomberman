@@ -33,6 +33,9 @@
   window.addEventListener('touchstart', () => AB.audio && AB.audio.unlock(), { passive: true });
 
   I.isDown = (code) => down.has(code);
+  // a key held down: on the keyboard, or a gamepad's stick / d-pad direction (for menu key repeat)
+  const padHeld = new Set();
+  I.held = (code) => down.has(code) || padHeld.has(code);
   // drain key presses for menu handling
   I.takePresses = () => pressedQueue.splice(0, pressedQueue.length);
 
@@ -58,8 +61,11 @@
   // synthesize menu presses from gamepads (edge detection)
   I.pollPadsForMenu = function () {
     const pads = I.pads();
+    padHeld.clear();
     pads.forEach((p, i) => {
       const b = padBits(p), o = padPrev[i] || 0, e = b & ~o;
+      if (b & AB.IN.UP) padHeld.add('ArrowUp');
+      if (b & AB.IN.DOWN) padHeld.add('ArrowDown');
       if (e & AB.IN.UP) pressedQueue.push({ code: 'ArrowUp', pad: i });
       if (e & AB.IN.DOWN) pressedQueue.push({ code: 'ArrowDown', pad: i });
       if (e & AB.IN.LEFT) pressedQueue.push({ code: 'ArrowLeft', pad: i });

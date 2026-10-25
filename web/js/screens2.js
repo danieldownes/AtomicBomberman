@@ -76,7 +76,7 @@
       this.back = a.back || 'options';
       this.players = a.players || AB.setup.filter(st => st.control !== 'off').length || 2;
       this.team = a.team !== undefined ? a.team : !!AB.settings.teamPlay;
-      if (this.sel === undefined) { this.sel = 2; this.top = 0; this.preset = 0; }
+      if (this.sel === undefined) { this.sel = 2; this.preset = 0; }
       // start on the scheme that's ticked first
       const on = AB.schemesOn(AB.settings), keys = AB.schemeKeys();
       if (this.sel < 2) this.sel = 2 + Math.max(0, keys.indexOf(on[0]));
@@ -93,12 +93,11 @@
     },
     key(k) {
       const rows = this.rows(), row = rows[this.sel], P = AB.SCHEME_PRESETS;
-      const page = 14;
-      if (k.code === 'ArrowUp') this.sel = (this.sel + rows.length - 1) % rows.length;
-      else if (k.code === 'ArrowDown') this.sel = (this.sel + 1) % rows.length;
-      else if (k.code === 'PageDown') this.sel = Math.min(rows.length - 1, this.sel + page);
-      else if (k.code === 'PageUp') this.sel = Math.max(0, this.sel - page);
-      else if (U.isBack(k)) this.close();
+      // the preset row, Done, then the schemes: one list to move through, the schemes shown scrolling
+      const nav = this.nav = this.nav || new U.ListView();
+      nav.sel = this.sel; nav.page = 16;
+      if (nav.nav(k, rows.length)) { this.sel = nav.sel; return; }
+      if (U.isBack(k)) this.close();
       else if (row.k === 'preset' && (k.code === 'ArrowLeft' || k.code === 'ArrowRight')) { this.preset = (this.preset + (k.code === 'ArrowLeft' ? P.length - 1 : 1)) % P.length; A.play(20); }
       else if (row.k === 'preset' && U.isOK(k)) {
         const keys = P[this.preset].keys(this.players, this.team);
@@ -120,31 +119,28 @@
       const S = AB.settings, rows = this.rows(), on = this.ticked(), P = AB.SCHEME_PRESETS;
       const nOn = AB.schemeKeys().filter(k => on[k]).length;
       G.text(ctx, `Each round is played on one of the ticked schemes (${nOn} ticked).  Green = suits ${this.players} players.`, 320, 58, GREY, 'font0', 1);
-      // the preset row and Done, then the scrolling list
+      // the preset row across the whole panel and Done, then the scrolling list of schemes beside the
+      // highlighted one's layout
       const pr = P[this.preset], prKeys = pr.keys(this.players, this.team);
-      const drawRow = (i, y, h) => { const sel = i === this.sel; if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.16)'; ctx.fillRect(32, y - 3, 312, h); U.menuCursor(ctx, 44, y + 15); } return sel; };
-      let sel = drawRow(0, 78, 22);
+      const drawRow = (i, y, h, w = 312) => { const sel = i === this.sel; if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.16)'; ctx.fillRect(32, y - 3, w, h); U.menuCursor(ctx, 44, y + 15); } return sel; };
+      let sel = drawRow(0, 78, 22, 576);
       G.text(ctx, 'Preset:', 62, 78, sel ? YELLOW : WHITE, 'font1');
-      G.text(ctx, fit(`${pr.name(this.players)} (${prKeys.length})`, 210), 132, 82, sel ? YELLOW : CYAN, 'font0');
+      G.text(ctx, fit(`${pr.name(this.players)} (${prKeys.length})` + (sel ? '   < >' : ''), 470), 132, 82, sel ? YELLOW : CYAN, 'font0');
       sel = drawRow(1, 102, 22);
       G.text(ctx, 'Done', 62, 102, sel ? YELLOW : WHITE, 'font1');
-      const V = 16, list = rows.length - 2;
-      const si = Math.max(0, this.sel - 2);
-      if (this.sel >= 2) { if (si < this.top) this.top = si; if (si >= this.top + V) this.top = si - V + 1; }
-      this.top = AB.clamp(this.top, 0, Math.max(0, list - V));
-      for (let j = 0; j < V && this.top + j < list; j++) {
-        const i = this.top + j + 2, row = rows[i], y = 130 + j * 17;
+      const view = this.view = this.view || new U.ListView();
+      if (this.sel >= 2) view.sel = this.sel - 2;
+      view.draw(ctx, rows.length - 2, 28, 130, 320, 17, 16, (j, y) => {
+        const i = j + 2, row = rows[i];
         const s2 = drawRow(i, y, 17);
         const f = AB.schemeFit(row.key), name = window.AB_DATA.schemes[row.key].name.replace(/\s*\((\d+\+?|\d+\s*ONLY)\)(\s*\(\d+\))?\s*$/i, '');
         U.drawTick(ctx, 60, y - 2, on[row.key] ? 2 : 0, s2);
         G.text(ctx, fit(name, 190, 'font0'), 82, y + 1, s2 ? YELLOW : on[row.key] ? WHITE : GREY, 'font0');
         G.text(ctx, f.label, 336, y + 1, f.fits(this.players) ? '#60f060' : '#887', 'font0', 2);
-      }
-      if (this.top > 0) G.text(ctx, '...', 190, 122, GREY, 'font0', 1);
-      if (this.top + V < list) G.text(ctx, '...', 190, 130 + V * 17 - 4, GREY, 'font0', 1);
+      }, 348);
       // the highlighted scheme: its layout, who it's for, what everyone starts with
       const cur = rows[this.sel].k === 'sch' ? rows[this.sel].key : AB.schemesOn(S)[0];
-      const sc = window.AB_DATA.schemes[cur], cw = 15, ch = 13, px = 364, py = 84;
+      const sc = window.AB_DATA.schemes[cur], cw = 15, ch = 13, px = 364, py = 130;
       ctx.fillStyle = '#203018'; ctx.fillRect(px, py, 15 * cw, 11 * ch);
       for (let yy = 0; yy < 11; yy++) for (let xx = 0; xx < 15; xx++) {
         const c = sc.rows[yy][xx];
@@ -337,7 +333,7 @@
   SC.register('sounds', {
     help: 'options',
     enter() {
-      this.lvl = 0; this.ev = null; this.gr = null; this.sel = [0, 0, 0]; this.top = [0, 0, 0];
+      this.lvl = 0; this.ev = null; this.gr = null; this.sel = [0, 0, 0]; this.lvs = [new U.ListView(), new U.ListView(), new U.ListView()];
       this.hold = 0; this.confirm = null; this.lastPreview = null;
       A.setVolumes(AB.settings.musicVolume * 0.35, AB.settings.sfxVolume);     // duck the music while listening
     },
@@ -361,8 +357,8 @@
       AB.saveSettings(); SC.go('settings');
     },
     open(row) {
-      if (row.kind === 'event') { this.ev = row.e; this.lvl = 1; this.sel[1] = 0; this.top[1] = 0; }
-      else if (row.kind === 'group') { this.gr = row.g; this.lvl = 2; this.sel[2] = 0; this.top[2] = 0; }
+      if (row.kind === 'event') { this.ev = row.e; this.lvl = 1; this.sel[1] = 0; this.lvs[1] = new U.ListView(); }
+      else if (row.kind === 'group') { this.gr = row.g; this.lvl = 2; this.sel[2] = 0; this.lvs[2] = new U.ListView(); }
       this.hold = 0; this.lastPreview = null;
     },
     toggle(row) {
@@ -383,16 +379,10 @@
         if (k.code === 'KeyY' || U.isOK(k)) A.applyPreset(S, this.confirm);
         this.confirm = null; return;
       }
-      const rows = this.rows(), L = this.lvl, row = rows[this.sel[L]];
-      const move = (d) => {
-        do { this.sel[L] = (this.sel[L] + d + rows.length) % rows.length; } while (rows[this.sel[L]].kind === 'section');
-        this.hold = 0;
-      };
-      if (k.code === 'ArrowUp') move(-1);
-      else if (k.code === 'ArrowDown') move(1);
-      else if (k.code === 'PageUp') { this.sel[L] = Math.max(0, this.sel[L] - ROWS); if (rows[this.sel[L]].kind === 'section') move(1); this.hold = 0; }
-      else if (k.code === 'PageDown') { this.sel[L] = Math.min(rows.length - 1, this.sel[L] + ROWS); if (rows[this.sel[L]].kind === 'section') move(1); this.hold = 0; }
-      else if (k.code === 'Space' || k.code === 'KeyT') { if (row.kind === 'preset') this.cyclePreset(1); else this.toggle(row); }
+      const rows = this.rows(), L = this.lvl, row = rows[this.sel[L]], lv = this.lvs[L];
+      lv.sel = this.sel[L];
+      if (lv.nav(k, rows.length, (i) => rows[i].kind === 'section')) { this.sel[L] = lv.sel; this.hold = 0; return; }
+      if (k.code === 'Space' || k.code === 'KeyT') { if (row.kind === 'preset') this.cyclePreset(1); else this.toggle(row); }
       else if (k.code === 'KeyR' || k.code === 'KeyP') { this.lastPreview = null; this.hold = 11; }
       else if (k.code === 'ArrowLeft' && L === 0 && row.kind === 'preset') this.cyclePreset(-1);
       else if (k.code === 'ArrowRight' && L === 0 && row.kind === 'preset') this.cyclePreset(1);
@@ -436,14 +426,13 @@
       else info = `${this.gr.clips.length} take${this.gr.clips.length > 1 ? 's' : ''} of this phrase`;
       G.text(ctx, fit(info, 580, 'font0'), 30, 48, GREY, 'font0');
       // list
-      const sel = this.sel[L];
-      this.top[L] = AB.clamp(this.top[L], Math.max(0, sel - ROWS + 1), Math.min(sel, Math.max(0, rows.length - ROWS)));
-      const top = this.top[L];
-      for (let r = 0; r < ROWS && top + r < rows.length; r++) {
-        const i = top + r, row = rows[i], y = TOP + r * ROW_H, isSel = i === sel;
+      const sel = this.sel[L], lv = this.lvs[L];
+      lv.sel = sel;
+      lv.draw(ctx, rows.length, 20, TOP, 596, ROW_H, ROWS, (i, y) => {
+        const row = rows[i], isSel = i === sel;
         if (isSel) { ctx.fillStyle = 'rgba(248,216,72,0.16)'; ctx.fillRect(24, y - 3, 592, ROW_H); U.menuCursor(ctx, 40, y + 16); }
         let x = 58, state = null, right = '', col = WHITE;
-        if (row.kind === 'section') { G.text(ctx, row.label, 34, y + 2, ORANGE, 'font0'); ctx.fillStyle = 'rgba(255,144,48,0.5)'; ctx.fillRect(34 + G.textWidth(row.label, 'font0') + 8, y + 10, 560 - G.textWidth(row.label, 'font0'), 1); continue; }
+        if (row.kind === 'section') { G.text(ctx, row.label, 34, y + 2, ORANGE, 'font0'); ctx.fillStyle = 'rgba(255,144,48,0.5)'; ctx.fillRect(34 + G.textWidth(row.label, 'font0') + 8, y + 10, 560 - G.textWidth(row.label, 'font0'), 1); return; }
         if (row.kind === 'event') {
           state = A.eventState(row.e);
           const gOn = row.e.groups.filter(g => A.groupState(row.e, g)).length;
@@ -474,9 +463,7 @@
         if (row.kind === 'take' && this.lastPreview === row.n) {
           for (let b = 0; b < 3; b++) { const h = 3 + Math.abs(Math.sin(U.frame() / (5 + b * 2) + b)) * 9; ctx.fillStyle = ORANGE; ctx.fillRect(28 + b * 5, y + 14 - h, 3, h); }
         }
-      }
-      if (top > 0) G.text(ctx, '...', 320, TOP - 14, GREY, 'font0', 1);
-      if (top + ROWS < rows.length) G.text(ctx, '...', 320, TOP + ROWS * ROW_H - 6, GREY, 'font0', 1);
+      }, 618);
       // details of the take under the cursor
       const row = rows[sel];
       if (row && row.kind === 'take') G.text(ctx, fit(tagsOf(A.clipInfo(row.n)[0]), 580, 'font0'), 30, 412, CYAN, 'font0');

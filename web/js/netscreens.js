@@ -868,10 +868,11 @@
     },
     key(k) {
       if (!NP.isHost()) { SC.go('network'); return; }
-      const items = this.items(), it = items[this.sel];
-      if (k.code === 'ArrowUp') { this.sel = (this.sel + items.length - 1) % items.length; A.play(20); }
-      else if (k.code === 'ArrowDown') { this.sel = (this.sel + 1) % items.length; A.play(21); }
-      else if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight') && it.change) { it.change(k.code === 'ArrowLeft' ? -1 : 1); A.play(20); AB.saveSettings(); NP.refreshRoom(); }
+      const items = this.items(), lv = this.lv = this.lv || new U.ListView();
+      lv.sel = this.sel;
+      if (lv.nav(k, items.length)) { this.sel = lv.sel; A.play(k.code === 'ArrowUp' || k.code === 'PageUp' ? 20 : 21); return; }
+      const it = items[this.sel];
+      if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight') && it.change) { it.change(k.code === 'ArrowLeft' ? -1 : 1); A.play(20); AB.saveSettings(); NP.refreshRoom(); }
       else if (U.isBack(k)) { AB.saveSettings(); SC.go('room'); }
       else if (U.isOK(k)) {
         if (it.action) { A.play(10); it.action(); }
@@ -884,12 +885,14 @@
       U.panel(ctx, 30, 22, 580, 420, 0.82);
       U.centerText(ctx, 'MATCH SETTINGS  -  ROOM ' + (NP.room ? NP.room.n : ''), 34, YELLOW);
       G.text(ctx, 'Changes show up for everyone in the room straight away.', 320, 56, GREY, 'font0', 1);
-      this.items().forEach((it, i) => {
-        const y = 76 + i * 22, sel = i === this.sel;
+      const items = this.items(), lv = this.lv = this.lv || new U.ListView();
+      lv.sel = this.sel;
+      lv.draw(ctx, items.length, 34, 76, 572, 22, 14, (i, y) => {
+        const it = items[i], sel = i === this.sel;
         if (sel) U.menuCursor(ctx, 48, y + 16);
         G.text(ctx, it.label, 66, y, sel ? YELLOW : WHITE, 'font1');
-        if (it.value) G.text(ctx, fit(it.value, 244), 352, y, sel ? YELLOW : CYAN, 'font1');
-      });
+        if (it.value) G.text(ctx, fit(it.value, 236), 352, y, sel ? YELLOW : CYAN, 'font1');
+      }, 600);
       G.text(ctx, 'Team play and the Gold Bomberman roulette are off in network games.', 320, 400, GREY, 'font0', 1);
       G.text(ctx, 'Up/Down: choose   Left/Right: change   Enter: open   Esc: back to the room', 320, 420, GREY, 'font0', 1);
     },
