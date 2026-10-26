@@ -19,8 +19,8 @@ const vm = require('node:vm');
 const { Worker, isMainThread, parentPort, workerData } = require('node:worker_threads');
 
 const WEB = path.resolve(__dirname, '..', 'web');
-const GAME_FILES = ['data/gamedata.js', 'js/core.js', 'js/game.js', 'js/ai.js', 'js/dangerous.js'];
-const ALIASES = { original: 'hard' };      // the menu's name for the game's own AI
+const GAME_FILES = ['data/gamedata.js', 'js/core.js', 'js/game.js', 'js/ai.js', 'js/original.js', 'js/dangerous.js'];
+const ALIASES = {};                        // other names for the AIs, if any
 const NO_LIMIT = 10 * 60 * 60;             // --time 0 (no time limit): a round stops after 10 minutes
 const BUCKETS = 96;                        // thinking-time histogram: bucket b counts calls up to 0.25 * 2^(b/4) us
 
@@ -29,7 +29,8 @@ const HELP = `Plays computer-only rounds of the game headless and reports how ea
   node tools/ai_arena.cjs [options]
 
   --lineup L    who plays, e.g. hard*2,medium*2 (default hard*4): 2 to 10 players.
-                The game's AIs are easy, medium and hard (= original); --ai adds more.
+                The game's AIs are easy, medium, original (the 1997 game's), hard and
+                dangerous; --ai adds more.
   --rounds N    rounds to play (default 200)
   --teams       play in teams, one per AI named in the lineup
   --arenas A    default (the ones the game picks from), all, or numbers or names: 0,4,forest
@@ -66,7 +67,7 @@ function hash32(x) {
 // window.AB is the game, and registers itself by name:
 //   window.AB.arena.register('mine', (g, p) => inputBits)
 // window.AB.arena.builtin(g, p) is the game's AI; for a player whose level it doesn't know, it plays
-// Original. Every computer player's move then goes through one function, which times it.
+// Hard. Every computer player's move then goes through one function, which times it.
 function loadGame(aiFiles = [], params = null) {
   const window = {};
   const run = (file) => vm.runInThisContext(`(function (window) {${fs.readFileSync(file, 'utf8')}\n})`, { filename: file })(window);
@@ -115,7 +116,7 @@ function options(env, o) {
     const m = /^\s*([\w-]+)\s*(?:\*\s*(\d+))?\s*$/.exec(part);
     if (!m) fail(`can't read "${part}" in --lineup (it looks like hard*2,medium*2)`);
     const name = ALIASES[m[1]] || m[1];
-    if (!known.includes(name)) fail(`there's no AI called "${m[1]}" (there are ${known.join(', ')}; original is hard)`);
+    if (!known.includes(name)) fail(`there's no AI called "${m[1]}" (there are ${known.join(', ')})`);
     for (let k = m[2] === undefined ? 1 : +m[2]; k > 0; k--) lineup.push(name);
   }
   if (lineup.length < 2 || lineup.length > AB.MAXP) fail(`a round needs 2 to ${AB.MAXP} players, not ${lineup.length}`);
@@ -312,7 +313,7 @@ function list(env) {
   out.push('', `Schemes (--schemes takes names, or a preset: ${AB.SCHEME_PRESETS.map(p => p.id).join(', ')}):`);
   const keys = AB.schemeKeys(), w = Math.max(...keys.map(k => k.length));
   for (const k of keys) out.push(`  ${k.padEnd(w)}  ${D.schemes[k].name.padEnd(40)} ${AB.schemeFit(k).label}`);
-  out.push('', `AIs: ${[...AB.AI.LEVELS, ...Object.keys(env.custom)].join(', ')} (original = hard)`);
+  out.push('', `AIs: ${[...AB.AI.LEVELS, ...Object.keys(env.custom)].join(', ')}`);
   return out.join('\n');
 }
 

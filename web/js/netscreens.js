@@ -35,7 +35,7 @@
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     ' - Ping is the round trip from the host to each computer.',
     ' - The host sets the number of computer players and their skill',
-    '   (Easy, Medium, Original or Dangerous), opens Match',
+    '   (Easy, Medium, Original, Hard or Dangerous), opens Match',
     '   settings (arenas, scheme, wins, play time and the gameplay',
     '   options) and starts the match (at least two players).',
     ' - Everyone in the room sees the settings change as the host picks',

@@ -45,7 +45,7 @@ window.AB_VERSION = { base: '1.1', build: '__AB_BUILD__', commit: '__AB_COMMIT__
 // progress bar. Then the engine scripts load in order and js/main.js starts the game.
 (function () {
   const DATA = [['data/gamedata.js', 176836], ['data/fonts.js', 23504], ['data/menufont.js', 197512], ['data/sprites.js', 3991153], ['data/classic.js', 13297], ['data/campaigns.js', 2542], ['data/sounds.js', 102604], ['data/titlefont.js', 22935]];
-  const CODE = ['js/core.js', 'js/hd.js', 'js/gfx.js', 'js/victory.js', 'js/tilesets.js', 'js/audio.js', 'js/input.js', 'js/game.js', 'js/ai.js', 'js/dangerous.js', 'js/render.js',
+  const CODE = ['js/core.js', 'js/hd.js', 'js/gfx.js', 'js/victory.js', 'js/tilesets.js', 'js/audio.js', 'js/input.js', 'js/game.js', 'js/ai.js', 'js/original.js', 'js/dangerous.js', 'js/render.js',
                 'js/net.js', 'js/voice.js', 'js/screens.js', 'js/screens2.js', 'js/netplay.js', 'js/netscreens.js', 'js/main.js'];
   // a deployed build asks for its own copy of every file (?v=<commit>), so a cached older file can't mix in
   const V = window.AB_VERSION || {}, bust = /^[0-9a-f]{7,40}$/.test(V.commit || '') ? '?v=' + V.commit : '';

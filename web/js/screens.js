@@ -526,7 +526,7 @@
       if (k.code === 'ArrowUp') this.sel = (this.sel + 9) % 10;
       else if (k.code === 'ArrowDown') this.sel = (this.sel + 1) % 10;
       else if (k.code === 'ArrowRight') {
-        // off -> AI easy -> AI medium -> AI original -> AI dangerous -> KEY 0 ... (the AI's skill rides along in aiLevel)
+        // off -> AI easy -> AI medium -> AI original -> AI hard -> AI dangerous -> KEY 0 ... (the AI's skill rides along in aiLevel)
         const o = setupTokens(), cur = s.control === 'ai' ? 'ai:' + (s.aiLevel || 'hard') : s.control;
         const nx = o[(o.indexOf(cur) + 1) % o.length];
         if (nx.startsWith('ai:')) { s.control = 'ai'; s.aiLevel = nx.slice(3); } else s.control = nx;

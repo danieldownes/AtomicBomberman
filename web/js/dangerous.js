@@ -3,7 +3,7 @@
 // every computer in a network game makes the same moves for it. Thinking allocates nothing: the scratch
 // arrays below are filled afresh on each use.
 //
-// It builds on the Original AI's idea (js/ai.js: work out when each cell will burn, walk round it), and
+// It builds on the Hard AI's idea (js/ai.js: work out when each cell will burn, walk round it), and
 //   - sees the board as it will be: its bombs' real fuse (Short Fuze), chain reactions, bricks that burn
 //     away and let a later blast through, where kicked and thrown bombs will go off, the closing walls;
 //     and times its steps as the game moves it (rows and columns differ, conveyors speed and slow it);

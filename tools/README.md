@@ -140,12 +140,12 @@ To inspect the files:
 To test the computer players:
 
 * `node tools/ai_arena.cjs` (Node 18 or later, no packages) plays computer-only rounds of the game
-  headless, with `web/js/game.js`, `ai.js` and `dangerous.js` exactly as the browser runs them,
-  spread over worker threads, and reports how each AI did. The AIs are `easy`, `medium`, `hard`
-  (the code's name for Original) and `dangerous`: `--lineup hard*2,medium*2 --rounds 400` plays two
-  Originals against two Mediums. `--help` lists the options (arenas, schemes, teams, round length,
-  closing walls, any other setting with `--set`, the Dangerous AI's weights with `--param`, seed)
-  and `--list` the arenas and schemes.
+  headless, with `web/js/game.js`, `ai.js`, `original.js` and `dangerous.js` exactly as the browser
+  runs them, spread over worker threads, and reports how each AI did. The AIs are `easy`, `medium`,
+  `original` (the 1997 game's), `hard` (the port's own) and `dangerous`:
+  `--lineup original*2,hard*2 --rounds 400` plays two Originals against two Hards. `--help` lists
+  the options (arenas, schemes, teams, round length, closing walls, any other setting with `--set`,
+  the Dangerous AI's weights with `--param`, seed) and `--list` the arenas and schemes.
   * For each AI it prints the rounds won, as a share of all rounds and of the rounds someone won,
     with a 95% confidence interval and the share it would have if all the AIs were equally strong;
     how often its players died to their own bomb, to another player's and to the closing walls;
@@ -159,11 +159,11 @@ To test the computer players:
     AI uses `Math.random` or the clock, or carries something over from one game to the next; in a
     network game, where every computer runs every AI, that would put the computers out of step.
   * The thinking times are only right with `--workers 1`: under Node 18 (WSL's, on Windows)
-    Dangerous takes about 22 µs per player per tick, Original 6, Medium 2 and Easy 0.8. With more
+    Dangerous takes about 22 µs per player per tick, Hard 7, Medium 2, Original and Easy under 1. With more
     workers they come out high, and the rounds stop getting faster from about 8 workers: 110,000 to
     145,000 ticks a second in all on a 12-core Ryzen 9 3900X, some 20 four-player rounds a second.
     Separate processes and Chrome's Web Workers stop at the same point, while plain arithmetic scales
-    on all 24 threads, so memory traffic is the likely limit: the Original AI allocates new arrays for
+    on all 24 threads, so memory traffic is the likely limit: the Hard AI allocates new arrays for
     every decision.
   * `--ai my_ai.js` loads another AI. The file runs like the game's own scripts (`window.AB` is the
     game) and registers the AI by name, which `--lineup` then takes (`--lineup mine,hard*3`):
@@ -171,7 +171,7 @@ To test the computer players:
     ```js
     window.AB.arena.register('mine', (g, p) => {
       // g: the game (js/game.js), p: the player; returns this tick's input bits (AB.IN)
-      return window.AB.arena.builtin(g, p);   // the game's AI (playing Original for a name it doesn't know)
+      return window.AB.arena.builtin(g, p);   // the game's AI (playing Hard for a name it doesn't know)
     });
     ```
 
@@ -179,7 +179,7 @@ To test the computer players:
     `p.ai` (under names the game's AI doesn't use, if it calls that too), or the check above fails.
 * `node tools/ai_tune.cjs --generations 12 --rounds 200` tunes the Dangerous AI's weights (`P` in
   `web/js/dangerous.js`) with a separable CMA-ES: generation by generation, ten weightings (`--size`)
-  each play the same rounds of the arena (`--lineup`, Dangerous against three Originals to start
+  each play the same rounds of the arena (`--lineup`, Dangerous against three Hards to start
   with), and the next ten are drawn around the better ones. Its score is the share of all rounds
   Dangerous wins, so draws count against it. After each generation it prints its best guess as
   `--param` options for the arena; try those against the current weights on other seeds

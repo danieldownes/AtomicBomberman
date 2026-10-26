@@ -124,14 +124,36 @@ NETWORK.md.
 
 ## Computer players
 
-Local Play > Player Setup: Right cycles a player through *AI easy*, *AI medium*, *AI original* and
-*AI dangerous*, then the keyboards and joysticks.
+Local Play > Player Setup: Right cycles a player through *AI easy*, *AI medium*, *AI original*,
+*AI hard* and *AI dangerous*, then the keyboards and joysticks.
 
 Typing on Player Setup gives the highlighted player its own name in place of "Player 3" (up to 12
 characters); Backspace deletes, and an empty name is "Player 3" again. The name shows on the name
 tags at the round start, the results and the victory screen. Tab switches a player's team (T now
 types).
 
+* **Original** (js/original.js): the 1997 game's own AI, ported from its executable (BM95.EXE). The
+  comments name the original function behind each part, so it reads side by side with
+  decompiled/BM95_decompiled.c.
+  * Each frame it tries eight behaviours in the original's order until one acts:
+    1. throw or pick up its own bomb with the blue glove;
+    2. punch a bomb next to it;
+    3. run from danger to the least dangerous cell in reach;
+    4. drop a bomb next to bricks (1 in 5);
+    5. drop one when someone is on or next to it (1 in 5, but not near where it started);
+    6. now and then go for a power-up;
+    7. now and then go after a player, people before computers;
+    8. otherwise wander.
+  * It drops bombs without checking it can get away from them.
+  * Reversed Controls don't affect it, as in the original.
+  * Its quirks are kept. For example, after half a second of going for power-ups in a round it stops
+    going for them, because the original resets the wrong timer.
+* **Hard:** the port's own AI, called Original until the 1997 one was ported. It works out when each
+  cell will burn and walks round it, bombs bricks and anyone in its blast, and goes for power-ups
+  nearby.
+* **Medium:** Hard, but it thinks it over less often, notices other players' bombs later, chases less
+  and grabs fewer power-ups.
+* **Easy:** all of that, more so.
 * **Dangerous** (js/dangerous.js): the strongest.
   * It works out when every cell will burn. That includes chain reactions (a bomb a blast reaches goes
     off with it), a brick that burns away and lets a later blast through, a kicked bomb going off
@@ -145,21 +167,25 @@ types).
     or two (then it knows where they'll hide).
   * It fires its remote bombs when someone stands in the blast, and kicks and punches bombs at people.
     A punched bomb that lands on a head stuns them, usually for long enough.
-* **Original:** the port's own AI, written for the port before the others (it takes only three tuning
-  values from the 1997 game's AI).
-* **Medium:** thinks it over less often, notices other players' bombs later, chases less and grabs
-  fewer power-ups.
-* **Easy:** all of that, more so.
+`node tools/ai_arena.cjs` plays computer-only rounds headless to compare them (see ../tools/README.md).
+Measured with it on the 11 default arenas, counting the rounds someone won:
 
-In a test of 60 rounds per pairing, two of each against two of the other: Original beat Medium 43 to 12, Original beat Easy 46 to 11,
-and Medium beat Easy 40 to 9. `node tools/ai_arena.cjs --lineup hard*2,medium*2` plays such a test
-headless (see ../tools/README.md). Measured that way on the 11 default arenas, one Dangerous player
-against three Originals won 42% of 1,000 rounds (62% of the rounds someone won, where an even share is
-25%), and 59% of 400 rounds one on one (79% of those someone won). It thinks for about 22 µs per player
-per tick, Original for 6. In network games the host sets one skill for all the computer players.
+* **Two against two:**
+  * Hard beat Medium 69% to 31%.
+  * Original beat Medium 66% to 34% and Easy 76% to 24%.
+  * Hard beat Original 58% to 42%.
+* **One on one:** Hard beat Original 60% to 40%.
+* **One Dangerous against three Hards:** Dangerous won 42% of 1,000 rounds, which is 62% of the rounds
+  someone won (an even share is 25%).
+* **Dangerous one on one against Hard:** 59% of 400 rounds (79%).
+* **One Dangerous against three Originals:** 58% (74%).
 
-Each computer player has its own random choices (seeded from the round and its slot, so network
-games stay in step), and they keep out of each other's way: of equally near safe cells they take
+Per player per tick, Original thinks for about 1 µs, Hard for 7 and Dangerous for 22.
+
+In network games the host sets one skill for all the computer players.
+
+Hard, Medium and Easy each have their own random choices (seeded from the round and its slot, so
+network games stay in step), and they keep out of each other's way: of equally near safe cells they take
 the least crowded one, and they don't pick a cell another player stands on or another computer
 player is heading for. Before, two that met made the same choices from then on and walked around
 on top of each other: 8 computer players overlapped 3.6 % of the time (once for 25 s on end); now
@@ -294,7 +320,8 @@ These are under main menu > Options, next to the original settings.
 index.html          the game
 js/core.js          constants, VALUELST.RES access, deterministic RNG
 js/game.js          the simulation (movement, bombs, flames, powerups, diseases, hurry walls...)
-js/ai.js            computer players (Easy, Medium, Original)
+js/ai.js            computer players: Hard, and Easy and Medium built on it
+js/original.js      the Original computer player: the 1997 game's AI, ported from BM95.EXE
 js/dangerous.js     the Dangerous computer player
 js/render.js        drawing with the original sprites
 js/screens.js       menus, results, victory, roulette, online manual, credits, intro movie

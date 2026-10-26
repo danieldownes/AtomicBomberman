@@ -102,8 +102,9 @@
   function enemyOf(g, p, o) { return o !== p && o.alive && (!g.S.teamPlay || o.team !== p.team); }
 
   // ---- skill levels ----
-  // 'hard' is the original AI, unchanged. The easier ones think it over less often (and keep doing the
-  // same thing meanwhile), notice bombs later, chase people less, drop fewer bombs and care less about
+  // 'hard' is the AI above, unchanged: the port's own, written for it (it was called Original until the
+  // 1997 game's AI was ported, js/original.js). The easier ones think it over less often (and keep doing
+  // the same thing meanwhile), notice bombs later, chase people less, drop fewer bombs and care less about
   // power-ups. Everything random comes from the game's own RNG, so network games stay in step.
   //   react: ticks between decisions (+ up to `jitter`)   see: how many ticks before a blast they notice it
   //   chase: how much enemies attract them                bombs: 1-in-N chance to consider a bomb at all
@@ -111,11 +112,13 @@
     easy:   { react: 12, jitter: 8, see: 50, chase: 0, bombs: 3, near: 2, items: 2 },
     medium: { react: 4, jitter: 4, see: 95, chase: 0.6, bombs: 1, near: 3, items: 1 },
   };
-  // 'dangerous' is a computer player of its own, in js/dangerous.js
-  AI.LEVELS = ['easy', 'medium', 'hard', 'dangerous'];
-  AI.LEVEL_NAMES = { easy: 'Easy', medium: 'Medium', hard: 'Original', dangerous: 'Dangerous' };
+  // 'original' (the 1997 game's AI, js/original.js) and 'dangerous' (js/dangerous.js) are computer
+  // players of their own
+  AI.LEVELS = ['easy', 'medium', 'original', 'hard', 'dangerous'];
+  AI.LEVEL_NAMES = { easy: 'Easy', medium: 'Medium', original: 'Original', hard: 'Hard', dangerous: 'Dangerous' };
   const MOVE = AB.IN.UP | AB.IN.DOWN | AB.IN.LEFT | AB.IN.RIGHT;
   AI.think = function (g, p) {
+    if (p.aiLevel === 'original' && AI.original) return AI.original(g, p);
     if (p.aiLevel === 'dangerous' && AI.dangerous) return AI.dangerous(g, p);
     const lv = LEVELS[p.aiLevel];
     if (!lv) return think(g, p, null);

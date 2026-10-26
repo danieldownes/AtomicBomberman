@@ -207,7 +207,7 @@
         warpLock: -1,                       // the warp just arrived at: it can't send you on until you've left its tile
         ai: pc.ai ? { plan: null, t: 0 } : null,
         isAI: !!pc.ai,
-        aiLevel: pc.aiLevel || 'hard',      // computer skill: 'easy', 'medium', 'hard' (Original) or 'dangerous'
+        aiLevel: pc.aiLevel || 'hard',      // computer skill: 'easy', 'medium', 'original' (1997), 'hard' or 'dangerous'
       };
       for (let i = 0; i < 15; i++) p.pw[i] = START[i];
       // scheme born-with powerups
