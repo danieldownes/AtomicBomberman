@@ -111,10 +111,12 @@
     easy:   { react: 12, jitter: 8, see: 50, chase: 0, bombs: 3, near: 2, items: 2 },
     medium: { react: 4, jitter: 4, see: 95, chase: 0.6, bombs: 1, near: 3, items: 1 },
   };
-  AI.LEVELS = ['easy', 'medium', 'hard'];
-  AI.LEVEL_NAMES = { easy: 'Easy', medium: 'Medium', hard: 'Original' };
+  // 'dangerous' is a computer player of its own, in js/dangerous.js
+  AI.LEVELS = ['easy', 'medium', 'hard', 'dangerous'];
+  AI.LEVEL_NAMES = { easy: 'Easy', medium: 'Medium', hard: 'Original', dangerous: 'Dangerous' };
   const MOVE = AB.IN.UP | AB.IN.DOWN | AB.IN.LEFT | AB.IN.RIGHT;
   AI.think = function (g, p) {
+    if (p.aiLevel === 'dangerous' && AI.dangerous) return AI.dangerous(g, p);
     const lv = LEVELS[p.aiLevel];
     if (!lv) return think(g, p, null);
     const st = p.ai || (p.ai = {});

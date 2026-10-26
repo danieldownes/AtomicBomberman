@@ -487,7 +487,7 @@
     for (let i = 0; i < Math.max(pads.length, 0); i++) o.push('joy' + i);
     return o;
   }
-  // Player Setup's Right key cycle: the three AI skills are separate steps
+  // Player Setup's Right key cycle: the AI skills are separate steps
   function setupTokens() {
     const o = [];
     for (const c of controlOptions()) { if (c === 'ai') for (const l of AB.AI.LEVELS) o.push('ai:' + l); else o.push(c); }
@@ -526,7 +526,7 @@
       if (k.code === 'ArrowUp') this.sel = (this.sel + 9) % 10;
       else if (k.code === 'ArrowDown') this.sel = (this.sel + 1) % 10;
       else if (k.code === 'ArrowRight') {
-        // off -> AI easy -> AI medium -> AI original -> KEY 0 ... (the AI's skill rides along in aiLevel)
+        // off -> AI easy -> AI medium -> AI original -> AI dangerous -> KEY 0 ... (the AI's skill rides along in aiLevel)
         const o = setupTokens(), cur = s.control === 'ai' ? 'ai:' + (s.aiLevel || 'hard') : s.control;
         const nx = o[(o.indexOf(cur) + 1) % o.length];
         if (nx.startsWith('ai:')) { s.control = 'ai'; s.aiLevel = nx.slice(3); } else s.control = nx;
@@ -560,8 +560,9 @@
         const label = st.name ? `${st.name}: ${controlLabel(st.control)}` : AB.msg(51, 'Player %u: %s').replace('%u', i + 1).replace('%s', controlLabel(st.control));
         G.text(ctx, label, l[0] + 26, y, st.control === 'off' ? GREY : i === this.sel ? YELLOW : WHITE, 'font1');
         // the AI's skill, small, after "AI"
-        if (st.control === 'ai') G.text(ctx, AB.AI.LEVEL_NAMES[st.aiLevel || 'hard'].toLowerCase(), l[0] + 32 + G.textWidth(label, 'font1'), y + 3, CYAN, 'font0');
-        if (AB.settings.teamPlay && st.control !== 'off') G.text(ctx, AB.msg(230, 'TEAM') + (st.team ? ' 2' : ' 1'), Math.max(l[0] + 170, l[0] + 40 + G.textWidth(label, 'font1') + (st.control === 'ai' ? 60 : 0)), y, st.team ? '#ff6060' : WHITE, 'font1');
+        const skill = st.control === 'ai' ? AB.AI.LEVEL_NAMES[st.aiLevel || 'hard'].toLowerCase() : '';
+        if (skill) G.text(ctx, skill, l[0] + 32 + G.textWidth(label, 'font1'), y + 3, CYAN, 'font0');
+        if (AB.settings.teamPlay && st.control !== 'off') G.text(ctx, AB.msg(230, 'TEAM') + (st.team ? ' 2' : ' 1'), Math.max(l[0] + 170, l[0] + 40 + G.textWidth(label, 'font1') + (skill ? Math.max(60, G.textWidth(skill, 'font0') + 12) : 0)), y, st.team ? '#ff6060' : WHITE, 'font1');
       }
       G.text(ctx, AB.msg(40, 'Available Joysticks:'), jh[0], jh[1], YELLOW, 'font1');
       const pads = I.pads();
@@ -574,7 +575,7 @@
         const dirs = L.up === 'ArrowUp' && L.down === 'ArrowDown' && L.left === 'ArrowLeft' ? 'Arrows' : `${kl(L.up)}${kl(L.left)}${kl(L.down)}${kl(L.right)}`;
         G.text(ctx, `KEY ${i}:  ${dirs}   bomb ${kl(L.bomb)}   action ${kl(L.action)}`, jl[0], ky + 24 + i * 20, WHITE, 'font0');
       });
-      G.text(ctx, 'Type: name   Right: change (AI: easy, medium, original)   Left: off   Tab: team   Enter: continue', 320, 418, GREY, 'font0', 1);
+      G.text(ctx, 'Type: name   Right: change (AI skill, then keys)   Left: off   Tab: team   Enter: continue', 320, 418, GREY, 'font0', 1);
       f1Hint(ctx);
       if (this.errT > 0) { panel(ctx, 100, 200, 440, 50, 0.9); centerText(ctx, this.err, 216, ORANGE); }
     },

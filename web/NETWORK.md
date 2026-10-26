@@ -28,7 +28,7 @@ needs no server of its own, so it works from GitHub Pages as it is.
   computers and ten players, as in the original.
 * The host has a menu:
   * **Computer players**: Left/Right.
-  * **Computer skill**: Easy, Medium or Original, for all of them. Players whose computer leaves
+  * **Computer skill**: Easy, Medium, Original or Dangerous, for all of them. Players whose computer leaves
     carry on at this skill too.
   * **Match settings**: the local Arena & Match choices, plus the gameplay options a network match
     uses. These are the arenas, ticked schemes (with presets; the host picks one for each round), wins or kills needed, play time, random start, conveyor
@@ -354,7 +354,8 @@ profiles (or one normal and one private window) at
 
 ## Keeping the simulation deterministic
 
-* Don't use `Math.random()` or `Date.now()` in js/game.js or js/ai.js.
+* Don't use `Math.random()` or `Date.now()` in js/game.js, js/ai.js or js/dangerous.js.
+  `node tools/ai_arena.cjs` plays its last rounds twice and says so if they come out differently.
 * Keep floating point out of the simulation. Positions, timers and speeds are integers. Only
   cosmetic values, such as the height of a thrown bomb's arc, use `Math.sin`.
 * Cosmetic choices, such as which taunt or explosion sample plays, can stay local and random.

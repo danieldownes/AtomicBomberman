@@ -124,22 +124,39 @@ NETWORK.md.
 
 ## Computer players
 
-Local Play > Player Setup: Right cycles a player through *AI easy*, *AI medium* and *AI original*,
-then the keyboards and joysticks.
+Local Play > Player Setup: Right cycles a player through *AI easy*, *AI medium*, *AI original* and
+*AI dangerous*, then the keyboards and joysticks.
 
 Typing on Player Setup gives the highlighted player its own name in place of "Player 3" (up to 12
 characters); Backspace deletes, and an empty name is "Player 3" again. The name shows on the name
 tags at the round start, the results and the victory screen. Tab switches a player's team (T now
 types).
 
-* **Original:** the port's AI, as before.
+* **Dangerous** (js/dangerous.js): the strongest.
+  * It works out when every cell will burn. That includes chain reactions (a bomb a blast reaches goes
+    off with it), a brick that burns away and lets a later blast through, a kicked bomb going off
+    wherever it has slid to when its fuse runs out, and a punched one where it comes down (off one edge
+    and back in at the other).
+  * It times its own steps as the game moves it, so it slips through the gaps between blasts.
+  * It never lays a bomb it can't get away from, nor one a nearby player could trap it with by laying
+    another, and it keeps out of corridors where that could happen.
+  * It minds Reversed Controls and Short Fuze, and keeps off trampolines, warps and diseases.
+  * It heads for where a bomb would do most, and lays bombs to leave someone no way out, or only one
+    or two (then it knows where they'll hide).
+  * It fires its remote bombs when someone stands in the blast, and kicks and punches bombs at people.
+    A punched bomb that lands on a head stuns them, usually for long enough.
+* **Original:** the port's own AI, written for the port before the others (it takes only three tuning
+  values from the 1997 game's AI).
 * **Medium:** thinks it over less often, notices other players' bombs later, chases less and grabs
   fewer power-ups.
 * **Easy:** all of that, more so.
 
 In a test of 60 rounds per pairing, two of each against two of the other: Original beat Medium 43 to 12, Original beat Easy 46 to 11,
 and Medium beat Easy 40 to 9. `node tools/ai_arena.cjs --lineup hard*2,medium*2` plays such a test
-headless (see ../tools/README.md). In network games the host sets one skill for all the computer players.
+headless (see ../tools/README.md). Measured that way on the 11 default arenas, one Dangerous player
+against three Originals won 42% of 1,000 rounds (62% of the rounds someone won, where an even share is
+25%), and 59% of 400 rounds one on one (79% of those someone won). It thinks for about 22 µs per player
+per tick, Original for 6. In network games the host sets one skill for all the computer players.
 
 Each computer player has its own random choices (seeded from the round and its slot, so network
 games stay in step), and they keep out of each other's way: of equally near safe cells they take
@@ -277,7 +294,8 @@ These are under main menu > Options, next to the original settings.
 index.html          the game
 js/core.js          constants, VALUELST.RES access, deterministic RNG
 js/game.js          the simulation (movement, bombs, flames, powerups, diseases, hurry walls...)
-js/ai.js            computer players
+js/ai.js            computer players (Easy, Medium, Original)
+js/dangerous.js     the Dangerous computer player
 js/render.js        drawing with the original sprites
 js/screens.js       menus, results, victory, roulette, online manual, credits, intro movie
 js/screens2.js      Sounds & Voices browser, Arenas, Campaign Mode

@@ -19,7 +19,7 @@ const vm = require('node:vm');
 const { Worker, isMainThread, parentPort, workerData } = require('node:worker_threads');
 
 const WEB = path.resolve(__dirname, '..', 'web');
-const GAME_FILES = ['data/gamedata.js', 'js/core.js', 'js/game.js', 'js/ai.js'];
+const GAME_FILES = ['data/gamedata.js', 'js/core.js', 'js/game.js', 'js/ai.js', 'js/dangerous.js'];
 const ALIASES = { original: 'hard' };      // the menu's name for the game's own AI
 const NO_LIMIT = 10 * 60 * 60;             // --time 0 (no time limit): a round stops after 10 minutes
 const BUCKETS = 96;                        // thinking-time histogram: bucket b counts calls up to 0.25 * 2^(b/4) us
@@ -38,6 +38,7 @@ const HELP = `Plays computer-only rounds of the game headless and reports how ea
   --time S      round length in seconds (default 150); 0 = no limit (stopped after 10 minutes)
   --walls N     closing walls from 0 (off) to 3 (all the way in); default 1
   --set K=V     any other setting of the game's, e.g. --set conveyorSpeed=2 (repeatable)
+  --param K=V   one of the Dangerous AI's weights (P in js/dangerous.js), e.g. --param kill=4000
   --ai FILE     load another AI from FILE (repeatable; see tools/README.md)
   --seed N      base seed (default 1)
   --first N     start at round N (to play round N again: --first N --rounds 1)
@@ -66,11 +67,12 @@ function hash32(x) {
 //   window.AB.arena.register('mine', (g, p) => inputBits)
 // window.AB.arena.builtin(g, p) is the game's AI; for a player whose level it doesn't know, it plays
 // Original. Every computer player's move then goes through one function, which times it.
-function loadGame(aiFiles = []) {
+function loadGame(aiFiles = [], params = null) {
   const window = {};
   const run = (file) => vm.runInThisContext(`(function (window) {${fs.readFileSync(file, 'utf8')}\n})`, { filename: file })(window);
   for (const f of GAME_FILES) run(path.join(WEB, f));
   const AB = window.AB, builtin = AB.AI.think, custom = {}, timing = {};
+  if (params) Object.assign(AB.AI.dangerousParams, params);
   AB.arena = { builtin, register(name, think) { custom[String(name).toLowerCase()] = think; } };
   for (const f of aiFiles) run(f);
   AB.AI.think = (g, p) => {
@@ -128,6 +130,14 @@ function options(env, o) {
     try { settings[k] = JSON.parse(v); } catch (e) { settings[k] = v; }
   }
   const S = Object.assign(defaults, settings);
+  // the Dangerous AI's weights to change: --param K=V, or params: {K: V}
+  const P = AB.AI.dangerousParams || {}, params = Object.assign({}, o.params);
+  for (const kv of o.param || []) {
+    const eq = kv.indexOf('='), k = kv.slice(0, eq), v = Number(kv.slice(eq + 1));
+    if (eq < 1 || !(k in P) || !Number.isFinite(v)) fail(`--param ${kv}: the weights are ${Object.keys(P).join(', ')}`);
+    params[k] = v;
+  }
+  for (const k of Object.keys(params)) if (!(k in P)) fail(`the Dangerous AI has no weight "${k}"`);
   const threads = os.availableParallelism ? os.availableParallelism() : os.cpus().length;
   return {
     lineup, names, teams, teamOf: Object.fromEntries(names.map((nm, t) => [nm, t])),
@@ -137,7 +147,7 @@ function options(env, o) {
     settings, playTime: S.playTime, enclosement: S.enclosement,
     workers: int(o.workers ?? Math.max(1, threads - 1), '--workers', 1, 1024),
     check: int(o.check ?? 2, '--check', 0, 1e6),
-    aiFiles: o.ai || [],
+    aiFiles: o.ai || [], params,
   };
 }
 function pickArenas(AB, spec) {
@@ -245,7 +255,10 @@ function report(env, res, o) {
   const arenas = opts.arenas.length === AB.LEVELS ? 'all' : opts.arenas.join(',') === pickArenas(AB).join(',') ? `the ${opts.arenas.length} default ones` : opts.arenas.map(i => AB.levelName(i)).join(', ');
   const schemes = opts.schemes.length === 1 ? D.schemes[opts.schemes[0]].name : `${opts.schemes.length}, at random`;
   out.push(`${plural(s.rounds, 'round')}, ${opts.lineup.length} computer players${opts.teams ? ' in teams' : ''}: ${s.ai.map(a => a.label).join(', ')}`);
-  out.push(`Arenas: ${arenas}. Schemes: ${schemes}. ${opts.playTime ? opts.playTime + ' s rounds' : 'No time limit'}, closing walls ${opts.enclosement}. Seed ${opts.seed}${opts.first ? `, rounds ${opts.first} on` : ''}.`, '');
+  out.push(`Arenas: ${arenas}. Schemes: ${schemes}. ${opts.playTime ? opts.playTime + ' s rounds' : 'No time limit'}, closing walls ${opts.enclosement}. Seed ${opts.seed}${opts.first ? `, rounds ${opts.first} on` : ''}.`);
+  const changed = Object.entries(opts.params);
+  if (changed.length) out.push(`Dangerous's weights changed: ${changed.map(([k, v]) => `${k}=${v}`).join(' ')}.`);
+  out.push('');
   const rows = [['', 'wins', 'of all', 'of won', '95% CI', 'if equal', 'own bomb', 'killed', 'walls', 'kills', 'us/tick', 'p99']];
   for (const a of s.ai) {
     const t = timing[a.name];
@@ -308,6 +321,7 @@ function list(env) {
 async function runArena(o = {}) {
   o = Object.assign({}, o, { ai: (o.ai || []).map(f => path.resolve(f)) });
   const env = loadGame(o.ai), opts = options(env, o);
+  if (env.AB.AI.dangerousParams) Object.assign(env.AB.AI.dangerousParams, opts.params);   // (for the check, which plays here)
   const end = opts.first + opts.rounds, workers = Math.min(opts.workers, opts.rounds);
   const chunk = Math.max(1, Math.min(16, Math.floor(opts.rounds / (workers * 8))));
   const records = [], timing = {}, pool = [];
@@ -353,7 +367,7 @@ async function runArena(o = {}) {
 }
 
 function workerMain() {
-  const opts = workerData, env = loadGame(opts.aiFiles);
+  const opts = workerData, env = loadGame(opts.aiFiles, opts.params);
   parentPort.on('message', (m) => {
     if (m.t === 'stop') { parentPort.close(); return; }
     const records = [], t0 = performance.now();
@@ -376,6 +390,7 @@ function parseArgs(argv) {
   const o = { ai: [], set: [] };
   const flags = { help: 'help', h: 'help', list: 'list', teams: 'teams', 'by-arena': 'byArena', quiet: 'quiet' };
   const values = ['lineup', 'rounds', 'first', 'seed', 'arenas', 'schemes', 'time', 'walls', 'workers', 'check', 'json'];
+  o.param = [];
   for (let i = 0; i < argv.length; i++) {
     let a = argv[i], v;
     if (!a.startsWith('-')) fail(`what is "${a}"? (--help lists the options)`);
@@ -383,9 +398,10 @@ function parseArgs(argv) {
     const eq = a.indexOf('=');
     if (eq >= 0) { v = a.slice(eq + 1); a = a.slice(0, eq); }
     if (flags[a]) { o[flags[a]] = true; continue; }
-    if (!values.includes(a) && a !== 'ai' && a !== 'set') fail(`there's no option --${a} (--help lists them)`);
+    if (!values.includes(a) && a !== 'ai' && a !== 'set' && a !== 'param') fail(`there's no option --${a} (--help lists them)`);
     if (v === undefined) { v = argv[++i]; if (v === undefined) fail(`--${a} needs a value`); }
-    if (a === 'ai') { if (!fs.existsSync(v)) fail(`there's no file ${v} (--ai)`); o.ai.push(path.resolve(v)); } else if (a === 'set') o.set.push(v); else o[a] = v;
+    if (a === 'ai') { if (!fs.existsSync(v)) fail(`there's no file ${v} (--ai)`); o.ai.push(path.resolve(v)); }
+    else if (a === 'set' || a === 'param') o[a].push(v); else o[a] = v;
   }
   return o;
 }
