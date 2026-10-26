@@ -162,7 +162,7 @@ To test the computer players:
     AI uses `Math.random` or the clock, or carries something over from one game to the next; in a
     network game, where every computer runs every AI, that would put the computers out of step.
   * The thinking times are only right with `--workers 1`: under Node 18 (WSL's, on Windows)
-    Dangerous takes about 32 µs per player per tick, Hard 6, Medium 3, Original 1 and Easy under 1. With more
+    Dangerous takes about 30 µs per player per tick, Hard 8, Medium 3, Original 1 and Easy under 1. With more
     workers they come out high, and the rounds stop getting faster from about 8 workers: 110,000 to
     145,000 ticks a second in all on a 12-core Ryzen 9 3900X, some 20 four-player rounds a second.
     Separate processes and Chrome's Web Workers stop at the same point, while plain arithmetic scales

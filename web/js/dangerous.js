@@ -7,7 +7,7 @@
 //   - sees the board as it will be: its bombs' real fuse (Short Fuze), chain reactions, bricks that burn
 //     away and let a later blast through, where kicked and thrown bombs will go off, the closing walls;
 //     and times its steps as the game moves it, from where it is in its cell (rows and columns differ,
-//     conveyors speed and slow it);
+//     conveyors speed and slow it); running from one, keeps on to where it was going if that will do;
 //   - never lays a bomb it can't get away from, nor one a nearby enemy could trap it with by laying one
 //     of their own next (where they stand, or a step nearer), and keeps out of places where that could
 //     happen;
@@ -19,6 +19,10 @@
 //     round, for power-ups and the bricks that hide them above all;
 //   - lays bombs to kill: where every way out an enemy has would burn, or only one or two are left, or
 //     just to take away some of their room; running from one bomb, it lays another if that corners them;
+//     knowing an enemy can wait for a blast to pass, or kick or punch the bomb away;
+//   - kicks bombs at enemies, timed to go off as they get there: the game's other computer players see a
+//     bomb's blast only from where it is, not where it's sliding to (or flying to, punched). It goes round
+//     behind a bomb to kick it, the more as the bricks run out;
 //   - late in the round keeps out of the closing walls' way, and gets between the enemies still out
 //     there and the middle;
 //   - fires its remote bombs when someone stands in the blast.
@@ -58,7 +62,15 @@
     jitter: 60,        // a tie-break of its own (changes every two seconds)
     walls: 400,        // a cell the closing walls will fill
     fireAfter: 60,     // fires a remote bomb that has caught nobody after this many ticks
+    keepOn: 1,         // running from a blast, keeps on to where it was going if that will do (0: the nearest safe cell)
     runLay: 300,       // running from a bomb, lays another on the way if it does this much to the enemies (0: never)
+    dodge: 1,          // knows how enemies get out of a corner: wait for a blast to pass and go on through after, or
+                       // kick or punch the bomb away (0: thinks they can't)
+    blind: 1,          // knows the game's other computer players don't see where a kicked bomb is going (or a
+                       // punched one, till it lands)
+    kickWait: 90,      // stands by a bomb up to this many ticks to kick it at the best moment (0: kicks at once)
+    kickLate: 100,     // ... and a kick counts this much more (percent) once the bricks are all gone, pro rata
+    kickSpot: 1,       // goes round behind a bomb to kick it at someone (0: kicks only bombs it happens to be by)
     early: 50,         // for the first this many seconds of a round...
     greedy: 200,       // ... power-ups, and bricks (which hide them), count this much (percent): they win the late game
     sick: 300,         // a cell next to a player with a disease, which it would catch (0: doesn't mind)
@@ -343,6 +355,89 @@
     }
     return k;
   }
+  // An enemy's room, as roomOf(search(...)) but knowing they can wait: stand where they are (or anywhere
+  // on the way) until a blast has been and gone, then go on through where it burnt, the cells of bombs
+  // that have gone off (the one at `wall` among them) included. Each cell is two places, before it burns
+  // and after its last flame, and the earliest they can be in each is found in order of time. Counts the
+  // cells they could get to and then stay in for good (that never burn, or have burnt out by then).
+  const tAt = new Int32Array(2 * N), heap = new Int32Array(16 * N), held = new Uint8Array(N);
+  let hn = 0;
+  function escape(g, sx, sy, speed, lead, s, e, wall, ox, oy, keep) {
+    tAt.fill(NEVER); held.fill(0); hn = 0;
+    const c0 = idx(sx, sy), slack = P.slack, conv = g.conveyorSpeed;
+    let room = 0;
+    inside = 0;
+    if (s[c0] > lead) reach(c0 * 2, lead);
+    while (hn > 0 && inside < ROOM) {
+      const v = pop(), st = v & 511, t = (v - st) / 512;
+      if (t > tAt[st]) continue;
+      const c = st >> 1, after = st & 1;
+      if (!held[c] && (after || s[c] >= NEVER)) { held[c] = 1; if (room < ROOM) room++; if (ringOf[c] >= keep) inside++; }
+      // the latest it can cross out of here: before here burns, if it's still to
+      const until = after || s[c] >= NEVER ? NEVER : s[c] - slack;
+      const x = c % COLS, y = (c - x) / COLS;
+      for (let k = 0; k < 4; k++) {
+        const x2 = x + DX[k], y2 = y + DY[k];
+        if (!AB.inArena(x2, y2)) continue;
+        const c2 = idx(x2, y2);
+        if (g.tiles[c2] !== 0 || g.brickT[c2] > 0) continue;
+        let v2 = speed;
+        const ex = g.extras[c2];
+        if (ex && ex.t === 'conveyor') v2 += ex.dir === k ? conv : ex.dir === ((k + 2) & 3) ? -conv : 0;
+        v2 = Math.max(100, v2);
+        const step = Math.ceil((k & 1 ? AB.CW : AB.CH) * AB.SUB / v2), rest = step - (step >> 1);
+        const half = st === c0 * 2 ? Math.max(0, Math.ceil((((k & 1 ? AB.CW : AB.CH) >> 1) - DX[k] * ox - DY[k] * oy) * AB.SUB / v2)) : step >> 1;
+        const w = warpTo[c2];
+        if (w >= 0) {
+          // a warp hole: in, and out of the one it leads to, before that burns or after
+          const enter = t + half, out = enter + rest + WARPT;
+          if (enter > until || (s[c2] < NEVER && enter + rest + slack > s[c2] && enter - slack < e[c2])) continue;
+          if (s[w] >= NEVER || out + rest + slack <= s[w]) reach(w * 2, out);
+          else if (e[w] < NEVER && out - slack >= e[w]) reach(w * 2 + 1, out);
+          continue;
+        }
+        // straight on through, before it burns (not where a bomb still is)
+        let enter = t + half;
+        if (enter <= until && c2 !== wall && g.bombAt[c2] < 0 && (s[c2] >= NEVER || enter + step + slack <= s[c2])) reach(c2 * 2, enter + rest);
+        // or in once its flames are out, waiting here till then if need be
+        if (s[c2] < NEVER && e[c2] < NEVER && (enter = Math.max(t + half, e[c2] + slack)) <= until) reach(c2 * 2 + 1, enter + rest);
+      }
+    }
+    return room;
+  }
+  // an enemy's room on board s/e: escape(), or (without P.dodge) as if they could never wait
+  function room(g, x, y, speed, lead, s, e, wall, ox, oy, keep) {
+    if (P.dodge) return escape(g, x, y, speed, lead, s, e, wall, ox, oy, keep);
+    return roomOf(s, queB, search(g, x, y, speed, lead, s, e, distB, prevB, queB, timeB, wall, 0, ox, oy), keep);
+  }
+  // (escape()'s queue: a binary heap of time * 512 + place, earliest first)
+  function reach(st, t) {
+    if (t >= tAt[st]) return;
+    tAt[st] = t;
+    const v = t * 512 + st;
+    let i = hn++;
+    while (i > 0) { const j = (i - 1) >> 1; if (heap[j] <= v) break; heap[i] = heap[j]; i = j; }
+    heap[i] = v;
+  }
+  function pop() {
+    const top = heap[0], v = heap[--hn];
+    let i = 0;
+    for (;;) {
+      let j = 2 * i + 1;
+      if (j >= hn) break;
+      if (j + 1 < hn && heap[j + 1] < heap[j]) j++;
+      if (heap[j] >= v) break;
+      heap[i] = heap[j]; i = j;
+    }
+    heap[i] = v;
+    return top;
+  }
+  // could enemy o send the bomb at cell c away (next to it, punching it, or kicking it into the open)?
+  function canSend(g, o, c) {
+    const x = c % COLS, y = (c - x) / COLS, ox = AB.cellX(o.x), oy = AB.cellY(o.y);
+    if (Math.abs(ox - x) + Math.abs(oy - y) !== 1) return false;
+    return !!o.pw[PW.PUNCH] || (!!o.pw[PW.KICK] && g.free(2 * x - ox, 2 * y - oy) && !g.playerAtCell(2 * x - ox, 2 * y - oy));
+  }
   // how many rings round the edge the closing walls will fill: while they fall, or (P.lateAt) from that
   // many seconds before they start; 0 for none
   function wallRings(g) {
@@ -407,7 +502,7 @@
   let cacheGame = null;
   function think(g, p) {
     const st = p.ai || (p.ai = {});
-    if (st.moveTo === undefined) { st.moveTo = -1; st.moveT = 0; st.target = -1; st.lastBomb = -999; st.goal = -1; }
+    if (st.moveTo === undefined) { st.moveTo = -1; st.moveT = 0; st.target = -1; st.lastBomb = -999; st.goal = -1; st.kick = -1; st.kickV = 0; }
     if (!p.alive || p.special === 5 || p.special === 6 || p.special === 7) return 0;
     if (p.held >= 0) return 0;                  // carrying a bomb (Poops with the blue glove): let it go
     const cx = AB.cellX(p.x), cy = AB.cellY(p.y), here = idx(cx, cy);
@@ -438,13 +533,19 @@
       goal = refuge(g, p, n, st);
       if (goal < 0) { n = search(g, cx, cy, speed, lead, S0, E0, distA, prevA, queA, timeA, -1, walk & (TRAMP | WARP), ox, oy); goal = refuge(g, p, n, st); }
       if (goal < 0) { n = search(g, cx, cy, speed, lead, S0, E0, distA, prevA, queA, timeA, -1, 0, ox, oy); goal = refuge(g, p, n, st); }
-      // or kick or punch the bomb away: at someone, or because there's nowhere to run
+      // or kick or punch the bomb away: at someone, or because there's nowhere to run (or stand by it,
+      // to kick it a little later)
       const send = sendBomb(g, p, cx, cy, here, speed, lead, centred, goal < 0);
-      if (send) { st.moveTo = -1; return send; }
+      if (send || standBy) { st.moveTo = -1; return send; }
       // or, on the way, lay another that corners someone (where they're running to is known), if it
       // could still get away from both
       if (P.runLay && goal >= 0 && centred && g.tick - st.lastBomb > P.bombGap && canBomb(g, p, cx, cy) && !(g.extras[here] && g.extras[here].t === 'warp') &&
-          bombWorth(g, p, cx, cy, here, speed, lead) >= P.layAt && pressed >= P.runLay) { st.lastBomb = g.tick; st.moveTo = -1; return IN.BOMB; }
+          bombWorth(g, p, cx, cy, here, speed, lead) >= P.layAt && pressed >= P.runLay) { st.lastBomb = g.tick; st.moveTo = -1; seen.pressed = pressed; return IN.BOMB; }
+      // or round behind a bomb near it, to kick it at someone at the right moment
+      if (p.pw[PW.KICK] && P.kickSpot && goal >= 0) {
+        if (st.kickT === undefined || g.tick - st.kickT >= 4) { kickSpots(g, p, st, speed, lead); st.kickT = g.tick; }
+        if (st.kick >= 0 && st.kick !== here && distA[st.kick] >= 0 && kickBoost(g, st, st.kickV) >= P.runLay) goal = st.kick;
+      }
       if (goal < 0) { let late = -1; for (let q = 0; q < n; q++) if (S0[queA[q]] > late) { late = S0[queA[q]]; goal = queA[q]; } }
     } else {
       // its oldest remote bomb (the one ACTION fires): fire it if it catches someone and not itself
@@ -460,16 +561,18 @@
           if (S2[here] >= NEVER && (hits || g.tick - ob.dropTick > P.fireAfter)) return IN.ACTION;
         }
       }
-      // a bomb next to it to kick or punch at someone?
+      // a bomb next to it to kick or punch at someone (now, or in a moment)?
       const send = sendBomb(g, p, cx, cy, here, speed, lead, centred, false);
-      if (send) { st.moveTo = -1; return send; }
+      if (send || standBy) { st.moveTo = -1; return send; }
       // a bomb here?
       let tried = false;
       if (centred && g.tick - st.lastBomb > P.bombGap && canBomb(g, p, cx, cy) && !(g.extras[here] && g.extras[here].t === 'warp')) {
-        if (bombWorth(g, p, cx, cy, here, speed, lead) >= P.layAt) { st.lastBomb = g.tick; st.moveTo = -1; return IN.BOMB; }
+        if (bombWorth(g, p, cx, cy, here, speed, lead) >= P.layAt) { st.lastBomb = g.tick; st.moveTo = -1; seen.pressed = pressed; return IN.BOMB; }
         tried = true;
       }
       if (st.trapT === undefined || g.tick - st.trapT >= 8) { findTrap(g, p, n, st, speed); st.trapT = g.tick; }
+      if (!p.pw[PW.KICK] || !P.kickSpot) st.kick = -1;
+      else if (st.kickT === undefined || g.tick - st.kickT >= 4) { kickSpots(g, p, st, speed, lead); st.kickT = g.tick; }
       goal = pickGoal(g, p, n, st, here, tried);
       st.target = goal;
       if (goal === here) goal = -1;
@@ -479,8 +582,9 @@
     seen.tick = g.tick; seen.slot = p.slot; seen.here = here; seen.goal = goal; seen.danger = risk[here] ? -1 : S0[here]; seen.bits = bits;
     return bits;
   }
-  // what the last call saw and chose (for looking into its decisions: nothing reads this back)
-  const seen = { tick: 0, slot: -1, here: -1, goal: -1, danger: NEVER, bits: 0, S0, E0, S1, risk };
+  // what the last call saw and chose (for looking into its decisions: nothing reads this back), and
+  // what the last bomb it laid did to the enemies (pressed: bombWorth()'s)
+  const seen = { tick: 0, slot: -1, here: -1, goal: -1, danger: NEVER, bits: 0, pressed: 0, S0, E0, S1, risk };
 
   // keepOff (and walk, warpTo) for player p: diseases lying about, trampolines, warp holes (and where
   // each leads, with P.warps, and which have enemies by them), and with P.sick, while p is well, the
@@ -521,6 +625,7 @@
       let sc = -distA[c] * 100 - Math.floor(crowd(g, p, c) * 60);
       if (S1[c] < NEVER) sc -= 250;
       if (c === st.goal) sc += 50;
+      if (c === st.target && P.keepOn) sc += distA[c] * 100;   // (where it was going anyway, if that will do)
       const ex = g.extras[c];
       if (ex && ex.t === 'conveyor') sc -= P.conveyor;
       const x = c % COLS, y = (c - x) / COLS;
@@ -576,7 +681,9 @@
   // bomb goes there); having to run at all, harassed; and every safe cell they lose (of the first ROOM)
   // is a cut. Late (wallRings), cells the closing walls will fill don't count as ways out, short of a kill:
   // left only those, they're squeezed. `wall`: the bomb's cell if it blocks the way; `stunned` (stunT
-  // ticks): an enemy the bomb bounces off, who can't move for that long.
+  // ticks): an enemy the bomb bounces off, who can't move for that long. One who could kick or punch the
+  // bomb away (and would think to) isn't cornered by it; one who won't see it coming till later (lagOf)
+  // starts to run only then. With P.dodge, they can wait a blast out (escape()).
   function pressure(g, p, wall, stunned, stunT) {
     const keep = P.lateAt ? wallRings(g) : 0;
     let worth = 0;
@@ -584,11 +691,12 @@
       if (!enemy(g, p, o) || o.tramp) continue;
       const ex = AB.cellX(o.x), ey = AB.cellY(o.y), oc = idx(ex, ey);
       if (S2[oc] >= NEVER) continue;
-      const ov = g.speedOf(o), ow = waitOf(o);
-      const all = roomOf(S2, queB, search(g, ex, ey, ov, o === stunned ? Math.max(stunT, ow) : ow, S2, E2, distB, prevB, queB, timeB, wall, 0, AB.offX(o.x), AB.offY(o.y)), keep);
+      if (P.dodge && wall >= 0 && !blind(o) && canSend(g, o, wall)) { if (S0[oc] >= NEVER) worth += P.harass; continue; }
+      const ov = g.speedOf(o), ow = waitOf(o), oX = AB.offX(o.x), oY = AB.offY(o.y);
+      const all = room(g, ex, ey, ov, Math.max(ow, o === stunned ? stunT : 0, lagOf[o.slot]), S2, E2, wall, oX, oY, keep);
       const k = inside;
       let allBefore = ROOM, before = ROOM;
-      if (S0[oc] < NEVER || keep) { allBefore = roomOf(S0, queB, search(g, ex, ey, ov, ow, S0, E0, distB, prevB, queB, timeB, -1, 0, AB.offX(o.x), AB.offY(o.y)), keep); before = inside; }
+      if (S0[oc] < NEVER || keep) { allBefore = room(g, ex, ey, ov, ow, S0, E0, -1, oX, oY, keep); before = inside; }
       if (all === 0 && allBefore > 0) { worth += P.kill; continue; }
       if (k < before) worth += P.cut * (before - k);
       if (k <= 2 && k < before) worth += Math.floor(P.squeeze / Math.max(1, k));
@@ -598,61 +706,175 @@
   }
 
   // the keys for kicking or punching a bomb next to it (0: neither), at an enemy, or if it `need`s to just
-  // to be safe
+  // to be safe; or standBy, if the best is to kick it a little later (it stays where it is till then)
   function sendBomb(g, p, cx, cy, here, speed, lead, centred, need) {
-    let d = -1;
-    if (p.pw[PW.KICK] && centred && (d = kickWorth(g, p, cx, cy, here, speed, lead, need)) >= 0) return reversed(p, KEYS[d]);
+    let kd = -1, kv = -1, kw = false, pd = -1, pv = -1;
+    if (p.pw[PW.KICK] && centred) { kd = kickWorth(g, p, cx, cy, here, speed, lead, need); kv = sentV; kw = standBy; }
+    if (p.pw[PW.PUNCH] && !(p.prevIn & IN.ACTION)) { pd = punchWorth(g, p, cx, cy, here, speed, lead, need); pv = sentV; }
+    standBy = false;
+    if ((kd >= 0 || kw) && kv >= pv) { standBy = kw; return kw ? 0 : reversed(p, KEYS[kd]); }
     // (facing the bomb, then the punch: the same tick)
-    if (p.pw[PW.PUNCH] && !(p.prevIn & IN.ACTION) && (d = punchWorth(g, p, cx, cy, here, speed, lead, need)) >= 0) return reversed(p, KEYS[d]) | IN.ACTION;
-    return 0;
+    return pd >= 0 ? reversed(p, KEYS[pd]) | IN.ACTION : 0;
   }
 
-  // Kicking a bomb next to it (js/game.js kickBomb, slideBomb): it slides a cell every SLIDE ticks with its
-  // fuse running, turned by arrows, and stops short of anything in the way, a player included, so a bomb
-  // sent down a corridor at someone goes off by them, or out in the open on the way if the fuse runs out
-  // first. Kicks one if that catches or corners an enemy and leaves it safe (or if it `need`s to, any kick
-  // that leaves it safe). Returns the direction, or -1.
+  // Kicking a bomb next to it (js/game.js kickBomb, slideBomb): it slides with its fuse running
+  // (slideEnd()), turned by arrows, and stops short of anything in the way, a player included, so a bomb
+  // sent down a corridor at someone goes off by them, or on the way if the fuse runs out first. Kicks one
+  // if that catches or corners an enemy and leaves it safe (or if it `need`s to, any kick that leaves it
+  // safe), at the best moment (bestKick()): now, or in a little while, standing by the bomb till then
+  // (standBy). Returns the direction to kick in now, or -1.
+  let standBy = false, sentV = -1;              // (kickWorth()'s: wait; and punchWorth()'s too: how good)
   function kickWorth(g, p, cx, cy, here, speed, lead, need) {
-    let best = -1, bv = need ? -1 : P.layAt;
+    let best = -1, bv = need ? -1 : P.layAt, bw = 0;
     for (let d = 0; d < 4; d++) {
-      const bx = cx + DX[d], by = cy + DY[d], b = g.bombAtCell(bx, by);
-      if (!b || b.motion !== 0 || b.kind !== 0) continue;           // (remote and jelly bombs: not foreseen)
-      if (!g.free(bx + DX[d], by + DY[d]) || g.playerAtCell(bx + DX[d], by + DY[d])) continue;
-      const c = slideEnd(g, bx, by, d, Math.max(0, b.fuse - b.t));
-      if (c === idx(bx, by)) continue;
-      moved = b; xCell[0] = c; xRange[0] = b.range; xFuse[0] = slideT; nExtra = 1;
+      const b = g.bombAtCell(cx + DX[d], cy + DY[d]);
+      if (!b) continue;
+      const v = bestKick(g, p, b, d, here, AB.offX(p.x), AB.offY(p.y), 0, speed, lead, need);
+      if (v > bv) { bv = v; best = d; bw = kickAt; }
+    }
+    sentV = bv;
+    standBy = best >= 0 && bw > 1;
+    return standBy ? -1 : best;
+  }
+  // The best moment to kick bomb b towards d from `from`, the cell behind it (where it is, ox/oy off its
+  // middle, or will be ta ticks from now): what that does to the enemies (pressure()), or -1 if it can't
+  // kick it that way and stay safe; kickAt: when. A kick changes where a bomb goes off, not when. Timed
+  // right, it gets to where its blast first reaches an enemy just as it goes off, and as the game's other
+  // computer players see a bomb's blast only from where it is, not where it's sliding to (lags()), they
+  // get next to no warning. So: as soon as it can, or timed to go off just after it gets there (or a
+  // little longer after), up to P.kickWait ticks later.
+  let kickAt = 0;
+  const times = new Int32Array(16);
+  function bestKick(g, p, b, d, from, ox, oy, ta, speed, lead, need) {
+    if (b.motion !== 0 || b.kind !== 0) return -1;                  // (remote and jelly bombs: not foreseen)
+    const bx = b.cx, by = b.cy, bc = idx(bx, by);
+    if (!g.free(bx + DX[d], by + DY[d]) || g.playerAtCell(bx + DX[d], by + DY[d])) return -1;
+    const fuse = Math.max(0, b.fuse - b.t);
+    slideEnd(g, bx, by, d, fuse - ta);
+    if (pathN < 2 || (!need && !inReach(g, p, b.range))) return -1;
+    let nt = 0;
+    times[nt++] = ta;
+    for (const o of g.players) {
+      if (need || !P.kickWait || !enemy(g, p, o)) continue;
+      const ex = AB.cellX(o.x), ey = AB.cellY(o.y);
+      for (let k = 1; k < pathN && nt < times.length - 2; k++) {
+        if (!inCross(g, path[k], b.range, ex, ey)) continue;
+        let w = fuse - pathT[k] - 2;
+        if (w > ta && w <= ta + P.kickWait) times[nt++] = w;
+        w -= 6;
+        if (w > ta && w <= ta + P.kickWait) times[nt++] = w;
+        break;
+      }
+    }
+    const fx = from % COLS, fy = (from - fx) / COLS;
+    let bv = -1;
+    kickAt = ta;
+    for (let i = 0; i < nt; i++) {
+      const w = times[i], c = slideEnd(g, bx, by, d, fuse - w);
+      if (c === bc) continue;
+      moved = b; xCell[0] = c; xRange[0] = b.range; xFuse[0] = w + slideT; nExtra = 1;
       danger(g, p, S2, E2);
       moved = null; nExtra = 0;
-      const m = search(g, cx, cy, speed, lead, S2, E2, distB, prevB, queB, timeB, -1, walk, AB.offX(p.x), AB.offY(p.y));
-      if ((S2[here] < NEVER || risk[here]) && !safeCells(S2, risk, queB, m, 1)) continue;
-      const v = pressure(g, p, c, null, 0);
-      if (v > bv) { bv = v; best = d; }
+      if (w > ta && S2[from] < w + P.slack) continue;              // (it stands there till then)
+      const m = search(g, fx, fy, speed, Math.max(lead, w), S2, E2, distB, prevB, queB, timeB, -1, walk, ox, oy);
+      if ((S2[from] < NEVER || risk[from]) && !safeCells(S2, risk, queB, m, 1)) continue;
+      lags(g, p, b.range, w);
+      const v = pressure(g, p, c, null, 0) - (w > ta ? 1 : 0);
+      lagOf.fill(0);
+      if (v > bv) { bv = v; kickAt = w; }
     }
-    return best;
+    return bv;
   }
-  // where a bomb kicked from (x, y) towards d goes off with t ticks of fuse left, and when (slideT)
-  let slideT = 0;
+  // What a kick worth v counts as now: more as the round opens up (with P.kickLate, up to that many
+  // percent more once every brick it started with is gone), when there's little else to bomb and a kick
+  // is the way to catch someone out in the open.
+  function kickBoost(g, st, v) {
+    let bricks = 0;
+    for (let c = 0; c < N; c++) if (g.tiles[c] === 2) bricks++;
+    if (st.bricks0 === undefined || bricks > st.bricks0) st.bricks0 = bricks;
+    return st.bricks0 ? v + Math.floor(v * P.kickLate * (st.bricks0 - bricks) / (100 * st.bricks0)) : v + Math.floor(v * P.kickLate / 100);
+  }
+  // Where it could kick a bomb from at the right moment (bestKick()): the cell behind a bomb near it, on
+  // the far side from where it would send it, that it can get to in time, and get away from if the kick
+  // doesn't come off. Sets st.kick (-1: nowhere) and st.kickV, what the kick would do.
+  function kickSpots(g, p, st, speed, lead) {
+    st.kick = -1; st.kickV = 0;
+    for (const b of g.bombs) {
+      if (!b || b.dead || b.motion !== 0 || b.kind !== 0) continue;
+      for (let d = 0; d < 4; d++) {
+        const kx = b.cx - DX[d], ky = b.cy - DY[d];
+        if (!AB.inArena(kx, ky)) continue;
+        const k = idx(kx, ky);
+        if (distA[k] < 0 || distA[k] > 5 || (warpTo[k] >= 0 && distA[k] > 0)) continue;
+        const v = bestKick(g, p, b, d, k, 0, 0, timeA[k], speed, lead, false);
+        if (v <= Math.max(st.kickV, P.layAt)) continue;
+        const m = search(g, kx, ky, speed, timeA[k], S0, E0, distB, prevB, queB, timeB, -1, walk);
+        if (!safeCells(S0, risk, queB, m, 1)) continue;
+        st.kick = k; st.kickV = v;
+      }
+    }
+  }
+  // Where a bomb kicked from (x, y) towards d goes off, with t ticks of fuse left (js/game.js slideBomb):
+  // it moves KICK_SPEED / SUB pixels a tick and gets into the next cell halfway across, turns on arrows,
+  // stops in the middle of a cell short of anything in the way (a player included), and goes off in a
+  // flame on the way. path[0..pathN-1]: the cells it goes through, pathT: when it gets into each (ticks
+  // after the kick); slideT: when it goes off.
+  const path = new Int16Array(COLS + ROWS + 1), pathT = new Int32Array(COLS + ROWS + 1);
+  let slideT = 0, pathN = 0;
   function slideEnd(g, x, y, d, t) {
+    let px = 0;                                 // from where it starts to the middle of the cell it's in
+    pathN = 1; path[0] = idx(x, y); pathT[0] = 0;
     for (let k = 0; k < COLS + ROWS; k++) {
       const ex = g.extras[idx(x, y)];
       if (ex && ex.t === 'arrow') d = ex.dir;
-      if ((k + 1) * SLIDE > t) break;
       const x2 = x + DX[d], y2 = y + DY[d];
       if (!g.free(x2, y2) || g.playerAtCell(x2, y2)) break;
       const ex2 = g.extras[idx(x2, y2)];
       if (ex2 && ex2.t === 'warp') break;
-      x = x2; y = y2;
-      if (g.flameT[idx(x, y)] > 0) { t = (k + 1) * SLIDE; break; }
+      const size = DX[d] ? AB.CW : AB.CH, into = Math.ceil((px + (size >> 1)) * AB.SUB / K.KICK_SPEED);
+      if (into > t) break;
+      x = x2; y = y2; px += size;
+      path[pathN] = idx(x, y); pathT[pathN++] = into;
+      if (g.flameT[idx(x, y)] > 0) { t = into; break; }
     }
     slideT = t;
     return idx(x, y);
+  }
+  // When each enemy (lagOf, by slot) would start getting out of the way of a bomb (of `range`) kicked
+  // along path[] w ticks from now: those who see a bomb's blast only from where it is (the game's other
+  // computer players, with P.blind) not till that reaches them, or it goes off; the others at once.
+  const lagOf = new Int32Array(16);
+  const blind = (o) => P.blind && o.isAI && o.aiLevel !== 'dangerous';
+  function lags(g, p, range, w) {
+    for (const o of g.players) {
+      if (!enemy(g, p, o) || !blind(o)) continue;
+      const ox = AB.cellX(o.x), oy = AB.cellY(o.y);
+      let t = w + slideT;
+      for (let k = 0; k < pathN; k++) if (inCross(g, path[k], range, ox, oy)) { t = k ? w + pathT[k] : 0; break; }
+      lagOf[o.slot] = t;
+    }
+  }
+  // is an enemy anywhere a bomb sliding along path[] could catch with its blast?
+  function inReach(g, p, range) {
+    for (const o of g.players) {
+      if (!enemy(g, p, o)) continue;
+      const ox = AB.cellX(o.x), oy = AB.cellY(o.y);
+      for (let k = 0; k < pathN; k++) if (inCross(g, path[k], range, ox, oy)) return true;
+    }
+    return false;
+  }
+  // is (x, y) in the blast of a bomb at cell c (nothing solid or brick in between)?
+  function inCross(g, c, range, x, y) {
+    const bx = c % COLS, by = (c - bx) / COLS;
+    return (bx === x || by === y) && Math.abs(bx - x) + Math.abs(by - y) <= range && clearLine(g, bx, by, x, y);
   }
 
   // Punching a bomb next to it (js/game.js punchBomb, flyBomb): it flies three cells, then on until it
   // can land, off one edge of the arena and back in at the other, its fuse waiting; landing on a head it
   // stuns them (STUN ticks they can't move, js/game.js bonk) and bounces on. Punches one if that catches or
   // corners an enemy (a stunned one next to the bomb rarely gets away), or if it `need`s to, any punch that
-  // leaves it safe. Returns the direction, or -1.
+  // leaves it safe. The game's other computer players take no notice of a bomb in the air till it lands
+  // (lagOf). Returns the direction, or -1.
   function punchWorth(g, p, cx, cy, here, speed, lead, need) {
     let best = -1, bv = need ? -1 : P.layAt;
     for (let d = 0; d < 4; d++) {
@@ -665,9 +887,12 @@
       moved = null; nExtra = 0;
       const m = search(g, cx, cy, speed, lead, S2, E2, distB, prevB, queB, timeB, -1, walk, AB.offX(p.x), AB.offY(p.y));
       if ((S2[here] < NEVER || risk[here]) && !safeCells(S2, risk, queB, m, 1)) continue;
+      for (const o of g.players) if (enemy(g, p, o) && blind(o)) lagOf[o.slot] = inCross(g, idx(bx, by), b.range, AB.cellX(o.x), AB.cellY(o.y)) ? 0 : throwT;
       const v = pressure(g, p, c, bonked, bonkT + K.STUN);
+      lagOf.fill(0);
       if (v > bv) { bv = v; best = d; }
     }
+    sentV = bv;
     return best;
   }
   // where a bomb punched from (x, y) towards d comes down, after how long (throwT), and whose head it
@@ -719,7 +944,7 @@
       const m = search(g, x, y, speed, timeA[c], S2, E2, distB, prevB, queB, timeB, -1, walk);
       if (!safeCells(S2, risk, queB, m, 1)) continue;
       const ex = AB.cellX(foe.x), ey = AB.cellY(foe.y);
-      const k = safeCells(S2, null, queB, search(g, ex, ey, g.speedOf(foe), waitOf(foe), S2, E2, distB, prevB, queB, timeB, c, 0, AB.offX(foe.x), AB.offY(foe.y)), 3);
+      const k = Math.min(3, room(g, ex, ey, g.speedOf(foe), waitOf(foe), S2, E2, c, AB.offX(foe.x), AB.offY(foe.y), 0));
       const v = Math.floor((k === 0 ? P.kill : k <= 2 ? Math.floor(P.squeeze / k) : 0) / 2);
       if (v > st.trapV) { st.trapV = v; st.trap = c; }
     }
@@ -793,7 +1018,7 @@
     let best = -1, bs = -NEVER;
     for (let q = 0; q < n && q < 90; q++) {
       const c = queA[q];
-      if (S0[c] < NEVER || risk[c]) continue;
+      if ((S0[c] < NEVER || risk[c]) && c !== st.kick) continue;   // (by a bomb to kick: it won't stay there)
       const x = c % COLS, y = (c - x) / COLS;
       let sc = -distA[c] * P.far;
       const it = g.items[c];
@@ -819,6 +1044,7 @@
       sc -= Math.floor(crowd(g, p, c) * P.crowd);
       if (c === st.target) sc += P.stick;
       if (c === st.trap) sc += st.trapV;
+      if (c === st.kick) sc += kickBoost(g, st, st.kickV) >> 1;
       if (walls && ringOf[c] < walls) sc -= P.walls;
       sc += ((Math.imul(c + 1, 2654435761) ^ Math.imul(p.slot + 7, 40503) ^ Math.imul(era + 1, 69069)) >>> 0) % (P.jitter + 1);
       if (sc > bs) { bs = sc; best = c; }
