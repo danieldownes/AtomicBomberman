@@ -138,7 +138,8 @@ types).
 * **Easy:** all of that, more so.
 
 In a test of 60 rounds per pairing, two of each against two of the other: Original beat Medium 43 to 12, Original beat Easy 46 to 11,
-and Medium beat Easy 40 to 9. In network games the host sets one skill for all the computer players.
+and Medium beat Easy 40 to 9. `node tools/ai_arena.cjs --lineup hard*2,medium*2` plays such a test
+headless (see ../tools/README.md). In network games the host sets one skill for all the computer players.
 
 Each computer player has its own random choices (seeded from the round and its slot, so network
 games stay in step), and they keep out of each other's way: of equally near safe cells they take
