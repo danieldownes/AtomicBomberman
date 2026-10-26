@@ -6,12 +6,21 @@
 // It builds on the Hard AI's idea (js/ai.js: work out when each cell will burn, walk round it), and
 //   - sees the board as it will be: its bombs' real fuse (Short Fuze), chain reactions, bricks that burn
 //     away and let a later blast through, where kicked and thrown bombs will go off, the closing walls;
-//     and times its steps as the game moves it (rows and columns differ, conveyors speed and slow it);
+//     and times its steps as the game moves it, from where it is in its cell (rows and columns differ,
+//     conveyors speed and slow it);
 //   - never lays a bomb it can't get away from, nor one a nearby enemy could trap it with by laying one
-//     of their own next, and keeps out of places where that could happen;
-//   - minds Reversed Controls, and keeps off trampolines, warps and diseases unless fleeing;
-//   - heads for where a bomb would do most (bricks, enemies) and it could still get away;
-//   - lays bombs to kill: where every way out an enemy has would burn, or only one or two are left;
+//     of their own next (where they stand, or a step nearer), and keeps out of places where that could
+//     happen;
+//   - minds Reversed Controls, keeps off trampolines and diseases unless fleeing, and keeps clear of
+//     players who have a disease;
+//   - goes through warp holes (the flames can't touch it meanwhile), to get away from its bombs and as
+//     short cuts, but not out of a hole an enemy waits by;
+//   - heads for where a bomb would do most (bricks, enemies) and it could still get away; early in the
+//     round, for power-ups and the bricks that hide them above all;
+//   - lays bombs to kill: where every way out an enemy has would burn, or only one or two are left, or
+//     just to take away some of their room; running from one bomb, it lays another if that corners them;
+//   - late in the round keeps out of the closing walls' way, and gets between the enemies still out
+//     there and the middle;
 //   - fires its remote bombs when someone stands in the blast.
 'use strict';
 (function (AB) {
@@ -26,9 +35,11 @@
   const P = {
     slack: 6,          // ticks to keep clear of a flame either side, walking through its cell
     threatDist: 4,     // an enemy this many steps away might lay a bomb next: don't be trappable by it
+    approach: 1,       // ... and one might take a step nearer first (0: only where they stand)
     kill: 3000,        // a bomb that leaves an enemy no way out
     squeeze: 600,      // ... or one way out (half that for two)
     harass: 200,       // ... or just makes an enemy run (they make mistakes on the run)
+    cut: 40,           // ... and per safe cell an enemy loses (of the first 12), short of cornering them
     brick: 150,        // each brick a bomb breaks
     burnItem: 300,     // each good power-up it would burn
     layAt: 150,        // lays a bomb worth at least this
@@ -47,6 +58,14 @@
     jitter: 60,        // a tie-break of its own (changes every two seconds)
     walls: 400,        // a cell the closing walls will fill
     fireAfter: 60,     // fires a remote bomb that has caught nobody after this many ticks
+    runLay: 300,       // running from a bomb, lays another on the way if it does this much to the enemies (0: never)
+    early: 50,         // for the first this many seconds of a round...
+    greedy: 200,       // ... power-ups, and bricks (which hide them), count this much (percent): they win the late game
+    sick: 300,         // a cell next to a player with a disease, which it would catch (0: doesn't mind)
+    lateAt: 65,        // from this many seconds left, with walls to come, a cell they will fill isn't one to
+                       // stay in, for it or for an enemy (0: it keeps clear of them only while they fall)
+    inner: 300,        // ... and a cell inside, by an enemy outside, cuts them off from the middle
+    warps: 1,          // goes through warp holes, out at the other end (0: keeps off them)
   };
   // what each power-up is worth to it, in hundredths of P.item; below zero: keep off
   const ITEM = [];
@@ -64,8 +83,17 @@
   const distB = new Int16Array(N), prevB = new Int16Array(N), queB = new Int16Array(N), timeB = new Int32Array(N);
   const distC = new Int16Array(N), queC = new Int16Array(N), seenC = new Int32Array(N);
   let stampC = 0;
-  // cells to keep off: a disease lying there, or a trampoline or warp (where it would land is anyone's guess)
-  const keepOff = new Uint8Array(N), DISEASED = 1, BOUNCY = 2, arm = new Int8Array(4);
+  // cells to keep off: a disease lying there, a trampoline (where it lands is anyone's guess), a warp
+  // hole (unless it means to go through), a cell by a player with a disease (catching), a warp hole with
+  // an enemy near enough to shut it in when it comes out there (a hole's way out is narrow)
+  const keepOff = new Uint8Array(N), DISEASED = 1, TRAMP = 2, WARP = 4, SICK = 8, AMBUSH = 16, arm = new Int8Array(4);
+  let walk = DISEASED | TRAMP | SICK | AMBUSH;  // what its own paths keep off (warp holes too, unless P.warps)
+  // a warp hole (with P.warps): the cell of the hole it comes out of; -1 not one
+  const warpTo = new Int16Array(N).fill(-1), holes = new Int16Array(16);
+  const WARPT = 2 * (K.WARP + 1);               // ticks warping (js/game.js updateWarp), out of the flames' reach
+  // which ring round the edge each cell is in (0: the outermost), as the closing walls fill them
+  const ringOf = new Uint8Array(N);
+  for (let c = 0; c < N; c++) { const x = c % COLS, y = (c - x) / COLS; ringOf[c] = Math.min(x, y, COLS - 1 - x, ROWS - 1 - y); }
   const MAXB = 160, MAXPOS = 4096;
   const bFrom = new Int16Array(MAXB), bTo = new Int16Array(MAXB), bRange = new Int16Array(MAXB);
   const bTime = new Int32Array(MAXB), bDone = new Uint8Array(MAXB), pos = new Int16Array(MAXPOS);
@@ -250,8 +278,11 @@
   // its speed going with it and takes it off going against it); a cell that burns while they'd be in it is
   // no way through. The cells end up in que (it returns how many), the steps in dist, the ticks to each in
   // time and the way back in prev. `wall`: a cell to count as blocked (a bomb about to be laid there);
-  // `off`: what to keep off (keepOff: DISEASED cells, BOUNCY ones), or 0.
-  function search(g, sx, sy, speed, lead, s, e, dist, prev, que, time, wall, off) {
+  // `off`: what to keep off (keepOff flags), or 0. A warp hole leads only to the hole it comes out of
+  // (that hole goes in que, the warp hole itself doesn't): in the flames can't touch them, but the
+  // walls still can. (ox, oy): how far from the middle of its cell it is now, in pixels: the first step
+  // is that much nearer or further, and it has to be out of its cell before that burns.
+  function search(g, sx, sy, speed, lead, s, e, dist, prev, que, time, wall, off, ox = 0, oy = 0) {
     dist.fill(-1);
     const c0 = idx(sx, sy), slack = P.slack, conv = g.conveyorSpeed;
     dist[c0] = 0; prev[c0] = -1; que[0] = c0; time[c0] = lead;
@@ -261,15 +292,31 @@
       for (let k = 0; k < 4; k++) {
         const x2 = x + DX[k], y2 = y + DY[k];
         if (!g.free(x2, y2)) continue;
-        const c2 = idx(x2, y2);
-        if (dist[c2] >= 0 || c2 === wall || (keepOff[c2] & off)) continue;
+        const c2 = idx(x2, y2), w = warpTo[c2];
+        // (the hole it stands in, it can step out of and back into: that warps it)
+        if ((dist[c2] >= 0 && !(c2 === c0 && w >= 0)) || c2 === wall || (keepOff[c2] & off & ~AMBUSH)) continue;
         let v = speed;
         const ex = g.extras[c2];
         if (ex && ex.t === 'conveyor') v += ex.dir === k ? conv : ex.dir === ((k + 2) & 3) ? -conv : 0;
-        const step = Math.ceil((k & 1 ? AB.CW : AB.CH) * AB.SUB / Math.max(100, v));
-        const enter = t + (step >> 1), leave = enter + step;
+        v = Math.max(100, v);
+        const step = Math.ceil((k & 1 ? AB.CW : AB.CH) * AB.SUB / v);
+        let enter = t + (step >> 1);
+        if (h === 0) {
+          enter = t + Math.max(0, Math.ceil((((k & 1 ? AB.CW : AB.CH) >> 1) - DX[k] * ox - DY[k] * oy) * AB.SUB / v));
+          if (s[c0] < enter) continue;
+        }
+        const leave = enter + step, mid = enter + step - (step >> 1);
+        if (w >= 0) {
+          // in to the middle of the hole, then out at the other, and off that one
+          const out = mid + WARPT, until = e[c2] >= NEVER ? mid + (WARPT >> 1) : mid;
+          if (dist[w] >= 0 || (keepOff[w] & off) || (s[c2] < NEVER && until + slack > s[c2] && enter - slack < e[c2])) continue;
+          if (s[w] < NEVER && out + (step >> 1) + slack > s[w] && out - slack < e[w]) continue;
+          if (c2 !== c0) { dist[c2] = d + 1; prev[c2] = c; time[c2] = mid; }
+          dist[w] = d + 2; prev[w] = c2 !== c0 ? c2 : c; que[n++] = w; time[w] = out;
+          continue;
+        }
         if (s[c2] < NEVER && leave + slack > s[c2] && enter - slack < e[c2]) continue;
-        dist[c2] = d + 1; prev[c2] = c; que[n++] = c2; time[c2] = t + step;
+        dist[c2] = d + 1; prev[c2] = c; que[n++] = c2; time[c2] = mid;
       }
     }
     return n;
@@ -280,6 +327,29 @@
     let k = 0;
     for (let q = 0; q < n && k < upTo; q++) if (s[que[q]] >= NEVER && !(r && r[que[q]])) k++;
     return k;
+  }
+  // an enemy's room: how many of the first n cells in que never burn (up to ROOM), and how many of those
+  // (inside, also up to ROOM) are in ring `keep` or further in, where the closing walls won't come
+  const ROOM = 12;
+  let inside = 0;
+  function roomOf(s, que, n, keep) {
+    let k = 0;
+    inside = 0;
+    for (let q = 0; q < n && inside < ROOM; q++) {
+      const c = que[q];
+      if (s[c] < NEVER) continue;
+      if (k < ROOM) k++;
+      if (ringOf[c] >= keep) inside++;
+    }
+    return k;
+  }
+  // how many rings round the edge the closing walls will fill: while they fall, or (P.lateAt) from that
+  // many seconds before they start; 0 for none
+  function wallRings(g) {
+    const en = g.enc, S = g.S;
+    if (en) return en.done ? 0 : Math.min(en.depth, 5);
+    if (!P.lateAt || g.timeLeft < 0 || g.timeLeft > P.lateAt * AB.TPS || !S.enclosement || S.playTime < K.HURRY) return 0;
+    return Math.min(S.enclosement === 3 ? 99 : S.enclosement * 2, 5);
   }
   function firstStep(prev, start, target) {
     let c = target;
@@ -305,14 +375,23 @@
     }
     return n;
   }
-  // the enemies close enough to trap it, as bombs they might lay where they stand (danger()'s extras)
+  // the enemies close enough to trap it, as bombs they might lay where they stand (danger()'s extras), and
+  // with P.approach, a step nearer it, where they'll be next (it's the way into where it is that they cut)
   function threats(g, p, cx, cy) {
     nExtra = 0;
     for (const o of g.players) {
-      if (nExtra >= 4 || !enemy(g, p, o) || o.tramp || o.special === 6 || o.special === 7) continue;
-      const ox = AB.cellX(o.x), oy = AB.cellY(o.y);
-      if (Math.abs(ox - cx) + Math.abs(oy - cy) > P.threatDist || !canBomb(g, o, ox, oy)) continue;
-      xCell[nExtra] = idx(ox, oy); xRange[nExtra] = g.flameLen(o); xFuse[nExtra] = fuseOf(o); nExtra++;
+      if (nExtra >= (P.approach ? 6 : 4) || !enemy(g, p, o) || o.tramp || o.special === 6 || o.special === 7) continue;
+      const ox = AB.cellX(o.x), oy = AB.cellY(o.y), d = Math.abs(ox - cx) + Math.abs(oy - cy);
+      if (d > P.threatDist || !canBomb(g, o, ox, oy)) continue;
+      const range = g.flameLen(o), fuse = fuseOf(o);
+      xCell[nExtra] = idx(ox, oy); xRange[nExtra] = range; xFuse[nExtra] = fuse; nExtra++;
+      if (!P.approach || d < 2) continue;
+      let next = -1, nd = d;
+      for (let k = 0; k < 4; k++) {
+        const x = ox + DX[k], y = oy + DY[k], dd = Math.abs(x - cx) + Math.abs(y - cy);
+        if (dd < nd && g.free(x, y)) { nd = dd; next = idx(x, y); }
+      }
+      if (next >= 0) { xCell[nExtra] = next; xRange[nExtra] = range; xFuse[nExtra] = fuse + Math.ceil(AB.CW * AB.SUB / Math.max(100, g.speedOf(o))); nExtra++; }
     }
     return nExtra;
   }
@@ -347,21 +426,25 @@
     }
     // ... and as it would if the enemies near it each laid a bomb now
     if (threats(g, p, cx, cy)) danger(g, p, S1, E1); else { S1.set(S0); E1.set(E0); }
-    for (let c = 0; c < N; c++) {
-      const it = g.items[c], ex = g.extras[c];
-      keepOff[c] = (it >= 0 && ITEM[it] < 0 ? DISEASED : 0) | (ex && (ex.t === 'trampoline' || ex.t === 'warp') ? BOUNCY : 0);
-    }
-    let n = search(g, cx, cy, speed, lead, S0, E0, distA, prevA, queA, timeA, -1, DISEASED | BOUNCY);
+    markCells(g, p);
+    // in a warp hole on its way through (not one it has just come out of): on to the very middle, where
+    // the warp takes it (stopping short, it would stand there)
+    if (warpTo[here] >= 0 && p.warpLock !== here && (ox || oy)) return reversed(p, ox > 0 ? IN.LEFT : ox < 0 ? IN.RIGHT : oy > 0 ? IN.UP : IN.DOWN);
+    let n = search(g, cx, cy, speed, lead, S0, E0, distA, prevA, queA, timeA, -1, walk, ox, oy);
     let goal = -1;
     if (S0[here] < NEVER || risk[here]) {
-      // in danger: the best way out, off diseases, trampolines and warps; if there's none, over a
-      // disease; and only if there's still none, a trampoline or warp
+      // in danger: the best way out, off diseases (lying or catching) and trampolines; if there's none,
+      // past a disease; and only if there's still none, on a trampoline (or a warp, without P.warps)
       goal = refuge(g, p, n, st);
-      if (goal < 0) { n = search(g, cx, cy, speed, lead, S0, E0, distA, prevA, queA, timeA, -1, BOUNCY); goal = refuge(g, p, n, st); }
-      if (goal < 0) { n = search(g, cx, cy, speed, lead, S0, E0, distA, prevA, queA, timeA, -1, 0); goal = refuge(g, p, n, st); }
+      if (goal < 0) { n = search(g, cx, cy, speed, lead, S0, E0, distA, prevA, queA, timeA, -1, walk & (TRAMP | WARP), ox, oy); goal = refuge(g, p, n, st); }
+      if (goal < 0) { n = search(g, cx, cy, speed, lead, S0, E0, distA, prevA, queA, timeA, -1, 0, ox, oy); goal = refuge(g, p, n, st); }
       // or kick or punch the bomb away: at someone, or because there's nowhere to run
       const send = sendBomb(g, p, cx, cy, here, speed, lead, centred, goal < 0);
       if (send) { st.moveTo = -1; return send; }
+      // or, on the way, lay another that corners someone (where they're running to is known), if it
+      // could still get away from both
+      if (P.runLay && goal >= 0 && centred && g.tick - st.lastBomb > P.bombGap && canBomb(g, p, cx, cy) && !(g.extras[here] && g.extras[here].t === 'warp') &&
+          bombWorth(g, p, cx, cy, here, speed, lead) >= P.layAt && pressed >= P.runLay) { st.lastBomb = g.tick; st.moveTo = -1; return IN.BOMB; }
       if (goal < 0) { let late = -1; for (let q = 0; q < n; q++) if (S0[queA[q]] > late) { late = S0[queA[q]]; goal = queA[q]; } }
     } else {
       // its oldest remote bomb (the one ACTION fires): fire it if it catches someone and not itself
@@ -399,6 +482,35 @@
   // what the last call saw and chose (for looking into its decisions: nothing reads this back)
   const seen = { tick: 0, slot: -1, here: -1, goal: -1, danger: NEVER, bits: 0, S0, E0, S1, risk };
 
+  // keepOff (and walk, warpTo) for player p: diseases lying about, trampolines, warp holes (and where
+  // each leads, with P.warps, and which have enemies by them), and with P.sick, while p is well, the
+  // cells by anyone who has a disease
+  function markCells(g, p) {
+    let nh = 0;
+    for (let c = 0; c < N; c++) {
+      const it = g.items[c], ex = g.extras[c];
+      keepOff[c] = (it >= 0 && ITEM[it] < 0 ? DISEASED : 0) | (ex && ex.t === 'trampoline' ? TRAMP : 0);
+      warpTo[c] = -1;
+      if (ex && ex.t === 'warp') { keepOff[c] |= WARP; if (nh < holes.length) holes[nh++] = c; }
+    }
+    // (as js/game.js startWarp: out of the last hole with the id this one names)
+    if (P.warps) {
+      for (let i = 0; i < nh; i++) for (let j = 0; j < nh; j++) if (g.extras[holes[j]].id === g.extras[holes[i]].dest) warpTo[holes[i]] = holes[j];
+      for (let i = 0; i < nh; i++) {
+        const hx = holes[i] % COLS, hy = (holes[i] - hx) / COLS;
+        for (const o of g.players) if (enemy(g, p, o) && Math.abs(AB.cellX(o.x) - hx) + Math.abs(AB.cellY(o.y) - hy) <= P.threatDist) keepOff[holes[i]] |= AMBUSH;
+      }
+    }
+    walk = DISEASED | TRAMP | SICK | AMBUSH | (P.warps ? 0 : WARP);
+    if (!P.sick || p.disT > 0) return;
+    for (const o of g.players) {
+      if (o === p || !o.alive || !(o.disT > 0)) continue;
+      const x = AB.cellX(o.x), y = AB.cellY(o.y);
+      keepOff[idx(x, y)] |= SICK;
+      for (let d = 0; d < 4; d++) if (AB.inArena(x + DX[d], y + DY[d])) keepOff[idx(x + DX[d], y + DY[d])] |= SICK;
+    }
+  }
+
   // where to run to: the nearest cell that never burns, better one an enemy couldn't catch it in either,
   // with room around it, off conveyors and with nobody else heading there
   function refuge(g, p, n, st) {
@@ -420,25 +532,28 @@
 
   // what a bomb laid here now would be worth, or -1 if it couldn't get away from it, or a nearby enemy
   // could trap it by laying another
+  let pressed = 0;                              // what the last bombWorth() made of it against the enemies
   function bombWorth(g, p, cx, cy, here, speed, lead) {
     const range = g.flameLen(p), fuse = fuseOf(p);
+    pressed = 0;
     // its way out with the bomb down, and with the bombs the enemies near it might lay as well
     const nThreats = threats(g, p, cx, cy);
     xCell[nThreats] = here; xRange[nThreats] = range; xFuse[nThreats] = fuse;
     nExtra = nThreats + 1; fireNow = null;
-    // (the way out mustn't need a trampoline or warp, nor walk over a disease)
+    // (the way out mustn't need a trampoline, nor go past a disease)
     if (nThreats) {
       danger(g, p, S3, E3);
-      const m = search(g, cx, cy, speed, lead, S3, E3, distB, prevB, queB, timeB, -1, DISEASED | BOUNCY);
+      const m = search(g, cx, cy, speed, lead, S3, E3, distB, prevB, queB, timeB, -1, walk, AB.offX(p.x), AB.offY(p.y));
       if (!safeCells(S3, risk, queB, m, 1)) { nExtra = 0; return -1; }
     }
     xCell[0] = here; xRange[0] = range; xFuse[0] = fuse; nExtra = 1;
     danger(g, p, S2, E2);
     nExtra = 0;
-    const m = search(g, cx, cy, speed, lead, S2, E2, distB, prevB, queB, timeB, -1, DISEASED | BOUNCY);
+    const m = search(g, cx, cy, speed, lead, S2, E2, distB, prevB, queB, timeB, -1, walk, AB.offX(p.x), AB.offY(p.y));
     if (!safeCells(S2, risk, queB, m, 1)) return -1;
-    let worth = pressure(g, p, here, null, 0);
+    let worth = pressed = pressure(g, p, here, null, 0);
     // bricks it would break (that nothing else is breaking already) and good power-ups it would burn
+    const greed = greedOf(g);
     for (let d = 0; d < 4; d++) {
       let x = cx, y = cy;
       for (let l = 0; l < range; l++) {
@@ -446,29 +561,37 @@
         if (!AB.inArena(x, y)) break;
         const c = idx(x, y), t = g.tiles[c];
         if (t === 1) break;
-        if (t === 2) { if (g.brickT[c] <= 0 && S0[c] >= NEVER) worth += P.brick; break; }
-        if (g.items[c] >= 0) { if (ITEM[g.items[c]] > 0) worth -= P.burnItem; break; }
+        if (t === 2) { if (g.brickT[c] <= 0 && S0[c] >= NEVER) worth += Math.floor(P.brick * greed / 100); break; }
+        if (g.items[c] >= 0) { if (ITEM[g.items[c]] > 0) worth -= Math.floor(P.burnItem * greed / 100); break; }
         if (g.bombAt[c] >= 0) break;
       }
     }
     return worth;
   }
+  // how much power-ups (and bricks) count now, in percent: more early in the round (P.early, P.greedy)
+  const greedOf = (g) => (g.tick < P.early * AB.TPS ? P.greedy : 100);
 
   // What the board in S2 (a bomb laid, kicked or thrown) does to the enemies, against S0 before it: an
   // enemy left no way out is a kill; one or two ways out, a squeeze (where it will hide is known: the next
-  // bomb goes there); having to run at all, harassed. `wall`: the bomb's cell if it blocks the way;
-  // `stunned` (stunT ticks): an enemy the bomb bounces off, who can't move for that long.
+  // bomb goes there); having to run at all, harassed; and every safe cell they lose (of the first ROOM)
+  // is a cut. Late (wallRings), cells the closing walls will fill don't count as ways out, short of a kill:
+  // left only those, they're squeezed. `wall`: the bomb's cell if it blocks the way; `stunned` (stunT
+  // ticks): an enemy the bomb bounces off, who can't move for that long.
   function pressure(g, p, wall, stunned, stunT) {
+    const keep = P.lateAt ? wallRings(g) : 0;
     let worth = 0;
     for (const o of g.players) {
       if (!enemy(g, p, o) || o.tramp) continue;
       const ex = AB.cellX(o.x), ey = AB.cellY(o.y), oc = idx(ex, ey);
       if (S2[oc] >= NEVER) continue;
       const ov = g.speedOf(o), ow = waitOf(o);
-      const k = safeCells(S2, null, queB, search(g, ex, ey, ov, o === stunned ? Math.max(stunT, ow) : ow, S2, E2, distB, prevB, queB, timeB, wall, 0), 3);
-      const before = S0[oc] >= NEVER ? 3 : safeCells(S0, null, queB, search(g, ex, ey, ov, ow, S0, E0, distB, prevB, queB, timeB, -1, 0), 3);
-      if (k === 0 && before > 0) worth += P.kill;
-      else if (k > 0 && k <= 2 && k < before) worth += Math.floor(P.squeeze / k);
+      const all = roomOf(S2, queB, search(g, ex, ey, ov, o === stunned ? Math.max(stunT, ow) : ow, S2, E2, distB, prevB, queB, timeB, wall, 0, AB.offX(o.x), AB.offY(o.y)), keep);
+      const k = inside;
+      let allBefore = ROOM, before = ROOM;
+      if (S0[oc] < NEVER || keep) { allBefore = roomOf(S0, queB, search(g, ex, ey, ov, ow, S0, E0, distB, prevB, queB, timeB, -1, 0, AB.offX(o.x), AB.offY(o.y)), keep); before = inside; }
+      if (all === 0 && allBefore > 0) { worth += P.kill; continue; }
+      if (k < before) worth += P.cut * (before - k);
+      if (k <= 2 && k < before) worth += Math.floor(P.squeeze / Math.max(1, k));
       else if (S0[oc] >= NEVER) worth += P.harass;
     }
     return worth;
@@ -500,7 +623,7 @@
       moved = b; xCell[0] = c; xRange[0] = b.range; xFuse[0] = slideT; nExtra = 1;
       danger(g, p, S2, E2);
       moved = null; nExtra = 0;
-      const m = search(g, cx, cy, speed, lead, S2, E2, distB, prevB, queB, timeB, -1, DISEASED | BOUNCY);
+      const m = search(g, cx, cy, speed, lead, S2, E2, distB, prevB, queB, timeB, -1, walk, AB.offX(p.x), AB.offY(p.y));
       if ((S2[here] < NEVER || risk[here]) && !safeCells(S2, risk, queB, m, 1)) continue;
       const v = pressure(g, p, c, null, 0);
       if (v > bv) { bv = v; best = d; }
@@ -540,7 +663,7 @@
       moved = b; xCell[0] = c; xRange[0] = b.range; xFuse[0] = throwT + Math.max(0, b.fuse - b.t); nExtra = 1;
       danger(g, p, S2, E2);
       moved = null; nExtra = 0;
-      const m = search(g, cx, cy, speed, lead, S2, E2, distB, prevB, queB, timeB, -1, DISEASED | BOUNCY);
+      const m = search(g, cx, cy, speed, lead, S2, E2, distB, prevB, queB, timeB, -1, walk, AB.offX(p.x), AB.offY(p.y));
       if ((S2[here] < NEVER || risk[here]) && !safeCells(S2, risk, queB, m, 1)) continue;
       const v = pressure(g, p, c, bonked, bonkT + K.STUN);
       if (v > bv) { bv = v; best = d; }
@@ -579,7 +702,7 @@
     let tried = 0;
     for (let q = 1; q < n && tried < 3; q++) {
       const c = queA[q];
-      if (distA[c] > 6) break;
+      if (distA[c] > 6) continue;               // (que is in order of steps, but for warps)
       if (S0[c] < NEVER || risk[c] || keepOff[c]) continue;
       const x = c % COLS, y = (c - x) / COLS;
       let foe = null;
@@ -593,10 +716,10 @@
       xCell[0] = c; xRange[0] = range; xFuse[0] = timeA[c] + fuse; nExtra = 1;
       danger(g, p, S2, E2);
       nExtra = 0;
-      const m = search(g, x, y, speed, timeA[c], S2, E2, distB, prevB, queB, timeB, -1, DISEASED | BOUNCY);
+      const m = search(g, x, y, speed, timeA[c], S2, E2, distB, prevB, queB, timeB, -1, walk);
       if (!safeCells(S2, risk, queB, m, 1)) continue;
       const ex = AB.cellX(foe.x), ey = AB.cellY(foe.y);
-      const k = safeCells(S2, null, queB, search(g, ex, ey, g.speedOf(foe), waitOf(foe), S2, E2, distB, prevB, queB, timeB, c, 0), 3);
+      const k = safeCells(S2, null, queB, search(g, ex, ey, g.speedOf(foe), waitOf(foe), S2, E2, distB, prevB, queB, timeB, c, 0, AB.offX(foe.x), AB.offY(foe.y)), 3);
       const v = Math.floor((k === 0 ? P.kill : k <= 2 ? Math.floor(P.squeeze / k) : 0) / 2);
       if (v > st.trapV) { st.trapV = v; st.trap = c; }
     }
@@ -609,8 +732,9 @@
   }
 
   // what bombing from cell c would do, roughly (bricks it breaks, enemies in its blast), if it could get
-  // out of the blast's way to a safe cell within `depth` steps; 0 if not. Fills arm[] with the blast.
-  function spotWorth(g, p, c, range, depth, keen) {
+  // out of the blast's way to a safe cell (or a warp hole) within `depth` steps; 0 if not. Fills arm[]
+  // with the blast.
+  function spotWorth(g, p, c, range, depth, keen, greed) {
     const x = c % COLS, y = (c - x) / COLS;
     let bricks = 0;
     for (let d = 0; d < 4; d++) {
@@ -639,12 +763,13 @@
         const x2 = x1 + DX[k], y2 = y1 + DY[k];
         if (!g.free(x2, y2)) continue;
         const c2 = idx(x2, y2);
-        if (seenC[c2] === stampC || S0[c2] < NEVER || keepOff[c2]) continue;
+        if (seenC[c2] === stampC || S0[c2] < NEVER || (keepOff[c2] & walk & ~AMBUSH)) continue;
+        if (warpTo[c2] >= 0) { if (!(keepOff[warpTo[c2]] & AMBUSH)) { out = true; break; } continue; }
         seenC[c2] = stampC; distC[c2] = distC[c1] + 1; queC[n++] = c2;
         if (!risk[c2] && !inBlast(c, x2, y2)) { out = true; break; }
       }
     }
-    return out ? bricks * P.spot + caught * P.hunt * keen : 0;
+    return out ? Math.floor(bricks * P.spot * greed / 100) + caught * P.hunt * keen : 0;
   }
   // is (x2, y2) in the blast spotWorth() last measured from cell c?
   function inBlast(c, x2, y2) {
@@ -654,11 +779,13 @@
     return false;
   }
 
-  // where to go when nothing threatens it: power-ups, places to bomb from, enemies to corner, room to move
+  // where to go when nothing threatens it: power-ups, places to bomb from, enemies to corner, room to move;
+  // keeping clear of anyone with a disease, and late in the round, of the cells the closing walls will
+  // fill, getting between the enemies out there and the middle
   function pickGoal(g, p, n, st, here, tried) {
     const range = g.flameLen(p);
     const depth = Math.max(1, Math.floor((fuseOf(p) - 30) * Math.max(100, g.speedOf(p)) / (AB.CW * AB.SUB)));
-    const walls = g.enc && !g.enc.done ? Math.min(g.enc.depth, 5) : 0;
+    const walls = wallRings(g), late = P.lateAt ? walls : 0, greed = greedOf(g), well = P.sick && !(p.disT > 0);
     const era = (g.tick / 120) | 0, bombs = canBomb(g, p, -1, -1);
     let foes = 0;
     for (const o of g.players) if (enemy(g, p, o)) foes++;
@@ -670,16 +797,21 @@
       const x = c % COLS, y = (c - x) / COLS;
       let sc = -distA[c] * P.far;
       const it = g.items[c];
-      if (it >= 0) sc += Math.floor(P.item * itemWorth(g, p, it) / 100);
-      if (bombs && !(c === here && tried)) sc += spotWorth(g, p, c, range, depth, keen);
-      let open = 0, foe = false;
+      if (it >= 0) sc += Math.floor(P.item * itemWorth(g, p, it) * greed / 10000);
+      if (bombs && !(c === here && tried) && !(keepOff[c] & WARP)) sc += spotWorth(g, p, c, range, depth, keen, greed);
+      let open = 0, foe = false, cut = false;
       for (let d = 0; d < 4; d++) if (g.free(x + DX[d], y + DY[d])) open++;
       for (const o of g.players) {
+        if (o === p || !o.alive) continue;
+        const ox = AB.cellX(o.x), oy = AB.cellY(o.y), dd = Math.abs(ox - x) + Math.abs(oy - y);
+        const sick = well && o.disT > 0;
+        if (sick && dd <= 2) sc -= P.sick;
         if (!enemy(g, p, o)) continue;
-        const dd = Math.abs(AB.cellX(o.x) - x) + Math.abs(AB.cellY(o.y) - y);
-        if (dd < 4) sc += (4 - dd) * P.near * keen;
+        if (dd < 4 && !sick) sc += (4 - dd) * P.near * keen;
         if (dd <= 5) foe = true;
+        if (late && dd <= 3 && ringOf[idx(ox, oy)] < late && ringOf[c] >= late) cut = true;
       }
+      if (cut) sc += P.inner;
       if (open < 2 && foe) sc -= P.deadEnd;
       if (S1[c] < NEVER && open <= 2) sc -= P.exposed;
       const ex = g.extras[c];
@@ -687,7 +819,7 @@
       sc -= Math.floor(crowd(g, p, c) * P.crowd);
       if (c === st.target) sc += P.stick;
       if (c === st.trap) sc += st.trapV;
-      if (walls && Math.min(x, y, COLS - 1 - x, ROWS - 1 - y) < walls) sc -= P.walls;
+      if (walls && ringOf[c] < walls) sc -= P.walls;
       sc += ((Math.imul(c + 1, 2654435761) ^ Math.imul(p.slot + 7, 40503) ^ Math.imul(era + 1, 69069)) >>> 0) % (P.jitter + 1);
       if (sc > bs) { bs = sc; best = c; }
     }

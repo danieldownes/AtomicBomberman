@@ -159,12 +159,23 @@ types).
     off with it), a brick that burns away and lets a later blast through, a kicked bomb going off
     wherever it has slid to when its fuse runs out, and a punched one where it comes down (off one edge
     and back in at the other).
-  * It times its own steps as the game moves it, so it slips through the gaps between blasts.
+  * It times its own steps as the game moves it, from where it is in its cell, so it slips through the
+    gaps between blasts.
   * It never lays a bomb it can't get away from, nor one a nearby player could trap it with by laying
-    another, and it keeps out of corridors where that could happen.
-  * It minds Reversed Controls and Short Fuze, and keeps off trampolines, warps and diseases.
-  * It heads for where a bomb would do most, and lays bombs to leave someone no way out, or only one
-    or two (then it knows where they'll hide).
+    another (where they stand, or a step nearer), and it keeps out of corridors where that could
+    happen.
+  * It minds Reversed Controls and Short Fuze. It keeps off diseases and trampolines unless there's no
+    other way out, and keeps clear of players who have a disease.
+  * It goes through warp holes, as short cuts and to get away from its own bombs, so it lays bombs by a
+    hole and then goes through. It won't come out of a hole with an enemy waiting by it.
+  * It heads for where a bomb would do most. Early in the round that means power-ups and the bricks
+    that hide them, above all.
+  * It lays bombs to leave someone no way out, or only one or two (then it knows where they'll hide),
+    and keeps up the pressure: a bomb that only takes away some of an enemy's room is worth laying
+    too. Running from one bomb, it lays another on the way if that corners someone.
+  * Late in the round it keeps away from the edges the closing walls will fill, and gets between the
+    middle and any enemy still out there. A bomb that leaves an enemy only cells the walls will fill
+    counts as cornering them.
   * It fires its remote bombs when someone stands in the blast, and kicks and punches bombs at people.
     A punched bomb that lands on a head stuns them, usually for long enough.
 `node tools/ai_arena.cjs` plays computer-only rounds headless to compare them (see ../tools/README.md).
@@ -175,12 +186,12 @@ Measured with it on the 11 default arenas, counting the rounds someone won:
   * Original beat Medium 66% to 34% and Easy 76% to 24%.
   * Hard beat Original 58% to 42%.
 * **One on one:** Hard beat Original 60% to 40%.
-* **One Dangerous against three Hards:** Dangerous won 42% of 1,000 rounds, which is 62% of the rounds
+* **One Dangerous against three Hards:** Dangerous won 56% of 2,000 rounds, which is 76% of the rounds
   someone won (an even share is 25%).
-* **Dangerous one on one against Hard:** 59% of 400 rounds (79%).
-* **One Dangerous against three Originals:** 58% (74%).
+* **Dangerous one on one against Hard:** 76% of 1,000 rounds (87%).
+* **One Dangerous against three Originals:** 67% of 1,000 rounds (79%).
 
-Per player per tick, Original thinks for about 1 µs, Hard for 7 and Dangerous for 22.
+Per player per tick, Original thinks for about 1 µs, Hard for 6 and Dangerous for 32.
 
 In network games the host sets one skill for all the computer players.
 

@@ -153,13 +153,16 @@ To test the computer players:
     had when their own bomb killed them, and the speed. `--by-arena` adds a table per arena, and
     `--json FILE` saves the lot, every round included.
   * Small differences need many rounds: at 200 rounds the 95% interval is still about 15 points wide.
+  * Each of the Dangerous AI's tactics has a weight of its own (`P` in `web/js/dangerous.js`), and 0
+    switches it off: `--param runLay=0` plays it without the bombs it lays on the run. The same rounds
+    with it and without show what a tactic is worth.
   * A round is a pure function of the options and its number. The results don't depend on the
     number of workers, `--first N --rounds 1` plays round N again on its own, and at the end the
     last two rounds are played again to check they come out the same (`--check`). They don't if an
     AI uses `Math.random` or the clock, or carries something over from one game to the next; in a
     network game, where every computer runs every AI, that would put the computers out of step.
   * The thinking times are only right with `--workers 1`: under Node 18 (WSL's, on Windows)
-    Dangerous takes about 22 µs per player per tick, Hard 7, Medium 2, Original and Easy under 1. With more
+    Dangerous takes about 32 µs per player per tick, Hard 6, Medium 3, Original 1 and Easy under 1. With more
     workers they come out high, and the rounds stop getting faster from about 8 workers: 110,000 to
     145,000 ticks a second in all on a 12-core Ryzen 9 3900X, some 20 four-player rounds a second.
     Separate processes and Chrome's Web Workers stop at the same point, while plain arithmetic scales

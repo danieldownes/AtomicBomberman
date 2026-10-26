@@ -23,7 +23,7 @@ Besides the original game, the port adds:
 * **An extra 8-bit "Classic" arena.**
 * **An extra "Bedrock" arena** with new terrain graphics: bedrock walls, grass and breakable dirt.
 * **A Dangerous computer player** that sees the board as it will burn, never lays a bomb it can't get
-  away from, corners people, and kicks and punches bombs at them.
+  away from, corners people (with a second bomb on the run), and kicks and punches bombs at them.
 * **The CD's intro movie.**
 
 ## Play
