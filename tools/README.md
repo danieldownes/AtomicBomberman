@@ -162,7 +162,7 @@ To test the computer players:
     AI uses `Math.random` or the clock, or carries something over from one game to the next; in a
     network game, where every computer runs every AI, that would put the computers out of step.
   * The thinking times are only right with `--workers 1`: under Node 18 (WSL's, on Windows)
-    Dangerous takes about 30 µs per player per tick, Hard 8, Medium 3, Original 1 and Easy under 1. With more
+    Dangerous takes about 25 µs per player per tick, Hard 9, Medium 3, Original 1 and Easy under 1. With more
     workers they come out high, and the rounds stop getting faster from about 8 workers: 110,000 to
     145,000 ticks a second in all on a 12-core Ryzen 9 3900X, some 20 four-player rounds a second.
     Separate processes and Chrome's Web Workers stop at the same point, while plain arithmetic scales
@@ -180,13 +180,27 @@ To test the computer players:
 
     Like the game's AI, it must take any randomness from the game (`g.rng`) and keep its state in
     `p.ai` (under names the game's AI doesn't use, if it calls that too), or the check above fails.
-* `node tools/ai_tune.cjs --generations 12 --rounds 200` tunes the Dangerous AI's weights (`P` in
-  `web/js/dangerous.js`) with a separable CMA-ES: generation by generation, ten weightings (`--size`)
-  each play the same rounds of the arena (`--lineup`, Dangerous against three Hards to start
-  with), and the next ten are drawn around the better ones. Its score is the share of all rounds
-  Dangerous wins, so draws count against it. After each generation it prints its best guess as
-  `--param` options for the arena; try those against the current weights on other seeds
-  (`--seed`) before writing them into `P`. 12 generations of 200 rounds take about 40 minutes.
+* `node tools/ai_tune.cjs --sessions 3 --generations 30 --rounds 300 --json tune.json` trains the
+  Dangerous AI's weights (`P` in `web/js/dangerous.js`) by play, with a separable CMA-ES (an evolution
+  strategy, not a neural network).
+  * Generation by generation, a cloud of weightings (`--size`, 14 for all 35 weights) each play the
+    same rounds of the arena, and so do the weights as they stand. A weighting scores the rounds its
+    Dangerous wins beyond theirs (draws count against it), so the luck of the draw mostly cancels out.
+    The next cloud is drawn around the better ones.
+  * `--lineup` sets the opponents. Several, joined by `+`, share the rounds, so it doesn't learn to beat
+    one kind of player only: `dangerous,hard*3+dangerous,hard+dangerous,original*3`. `--only kill,cut`
+    trains just those weights.
+  * Every few generations (`--validate`) the cloud's centre plays the weights as they stand on fresh
+    rounds (`--vrounds`). The best centre to beat them by more than chance (95%) is the champion,
+    printed as `--param` options for the arena.
+  * A run is a few sessions in a row: the first starts from `P`, each later one from a random spread
+    about it (`--spread`), so they look in different places.
+  * The whole state goes to the `--json` file after every generation, and `--resume tune.json` carries
+    on from it (add `--sessions` or `--generations` to make the run longer). Stop it with Ctrl+C at
+    any time.
+  * A generation of 14 weightings and 300 rounds takes about 4 minutes on 16 workers. Check a
+    champion against `P` on more seeds before writing it into `P`. `output/training/` (git-ignored)
+    is the place for runs.
 
 To redo the decompilation (needs `angr`, `r2pipe` and radare2):
 

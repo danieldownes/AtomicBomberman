@@ -12,7 +12,8 @@
 //     of their own next (where they stand, or a step nearer), and keeps out of places where that could
 //     happen;
 //   - minds Reversed Controls, keeps off trampolines and diseases unless fleeing, and keeps clear of
-//     players who have a disease;
+//     players who have a disease; but penned in by them for a while, it goes over a trampoline, and in
+//     the end past a disease;
 //   - goes through warp holes (the flames can't touch it meanwhile), to get away from its bombs and as
 //     short cuts, but not out of a hole an enemy waits by;
 //   - heads for where a bomb would do most (bricks, enemies) and it could still get away; early in the
@@ -25,7 +26,7 @@
 //     behind a bomb to kick it, the more as the bricks run out;
 //   - late in the round keeps out of the closing walls' way, and gets between the enemies still out
 //     there and the middle;
-//   - fires its remote bombs when someone stands in the blast.
+//   - fires its remote bombs when someone stands in the blast, getting out of it first if need be.
 'use strict';
 (function (AB) {
   const { COLS, ROWS, DX, DY, IN, PW, DIS, K } = AB;
@@ -62,6 +63,7 @@
     jitter: 60,        // a tie-break of its own (changes every two seconds)
     walls: 400,        // a cell the closing walls will fill
     fireAfter: 60,     // fires a remote bomb that has caught nobody after this many ticks
+    shot: 600,         // a cell out of the blast of its remote bomb, with an enemy in it, to fire from
     keepOn: 1,         // running from a blast, keeps on to where it was going if that will do (0: the nearest safe cell)
     runLay: 300,       // running from a bomb, lays another on the way if it does this much to the enemies (0: never)
     dodge: 1,          // knows how enemies get out of a corner: wait for a blast to pass and go on through after, or
@@ -74,6 +76,9 @@
     early: 50,         // for the first this many seconds of a round...
     greedy: 200,       // ... power-ups, and bricks (which hide them), count this much (percent): they win the late game
     sick: 300,         // a cell next to a player with a disease, which it would catch (0: doesn't mind)
+    pen: 6,            // able to get to this few cells, it's penned in ...
+    penned: 60,        // ... and after this many ticks goes over what keeps it there (0: never)
+    penSick: 5,        // ... and past a disease after this many times as long (0: never)
     lateAt: 65,        // from this many seconds left, with walls to come, a cell they will fill isn't one to
                        // stay in, for it or for an enemy (0: it keeps clear of them only while they fall)
     inner: 300,        // ... and a cell inside, by an enemy outside, cuts them off from the middle
@@ -527,6 +532,10 @@
     if (warpTo[here] >= 0 && p.warpLock !== here && (ox || oy)) return reversed(p, ox > 0 ? IN.LEFT : ox < 0 ? IN.RIGHT : oy > 0 ? IN.UP : IN.DOWN);
     let n = search(g, cx, cy, speed, lead, S0, E0, distA, prevA, queA, timeA, -1, walk, ox, oy);
     let goal = -1;
+    // its remote bombs: fire the oldest if that catches someone (or nobody for a while), or get clear of
+    // its blast to fire it (st.shot)
+    st.shot = false;
+    if (mine && !(p.prevIn & IN.ACTION) && fire(g, p, st, cx, cy, here, speed, lead, ox, oy)) return IN.ACTION;
     if (S0[here] < NEVER || risk[here]) {
       // in danger: the best way out, off diseases (lying or catching) and trampolines; if there's none,
       // past a disease; and only if there's still none, on a trampoline (or a warp, without P.warps)
@@ -548,19 +557,6 @@
       }
       if (goal < 0) { let late = -1; for (let q = 0; q < n; q++) if (S0[queA[q]] > late) { late = S0[queA[q]]; goal = queA[q]; } }
     } else {
-      // its oldest remote bomb (the one ACTION fires): fire it if it catches someone and not itself
-      if (mine && !(p.prevIn & IN.ACTION)) {
-        let ob = null;
-        for (const b of g.bombs) if (b && !b.dead && b.owner === p.slot && b.kind === 1 && b.motion < 2 && (!ob || b.dropTick < ob.dropTick)) ob = b;
-        if (ob) {
-          nExtra = 0; fireNow = ob;
-          danger(g, p, S2, E2);
-          fireNow = null;
-          let hits = 0;
-          for (const o of g.players) if (enemy(g, p, o) && S2[idx(AB.cellX(o.x), AB.cellY(o.y))] <= 2) hits++;
-          if (S2[here] >= NEVER && (hits || g.tick - ob.dropTick > P.fireAfter)) return IN.ACTION;
-        }
-      }
       // a bomb next to it to kick or punch at someone (now, or in a moment)?
       const send = sendBomb(g, p, cx, cy, here, speed, lead, centred, false);
       if (send || standBy) { st.moveTo = -1; return send; }
@@ -569,6 +565,16 @@
       if (centred && g.tick - st.lastBomb > P.bombGap && canBomb(g, p, cx, cy) && !(g.extras[here] && g.extras[here].t === 'warp')) {
         if (bombWorth(g, p, cx, cy, here, speed, lead) >= P.layAt) { st.lastBomb = g.tick; st.moveTo = -1; seen.pressed = pressed; return IN.BOMB; }
         tried = true;
+      }
+      // penned into a few cells by the things it keeps off: after a while (P.penned ticks), over a trampoline
+      // or a warp hole an enemy waits by; after P.penSick times as long, past a disease too, rather than
+      // stay there for good
+      if (n > P.pen) st.penT = -1;
+      else if (P.penned) {
+        if (!(st.penT >= 0)) st.penT = g.tick;
+        const long = g.tick - st.penT;
+        const off = walk & ~(long >= P.penned ? TRAMP | AMBUSH : 0) & ~(P.penSick && long >= P.penSick * P.penned ? DISEASED | SICK : 0);
+        if (off !== walk) n = search(g, cx, cy, speed, lead, S0, E0, distA, prevA, queA, timeA, -1, off, ox, oy);
       }
       if (st.trapT === undefined || g.tick - st.trapT >= 8) { findTrap(g, p, n, st, speed); st.trapT = g.tick; }
       if (!p.pw[PW.KICK] || !P.kickSpot) st.kick = -1;
@@ -582,6 +588,28 @@
     seen.tick = g.tick; seen.slot = p.slot; seen.here = here; seen.goal = goal; seen.danger = risk[here] ? -1 : S0[here]; seen.bits = bits;
     return bits;
   }
+  // Its oldest remote bomb (the one ACTION fires, js/game.js detonateOldestTrigger): fire it if that
+  // catches an enemy (a remote blast gives no warning) or has caught nobody for P.fireAfter ticks, and
+  // leaves it safe: out of the blast (chain reactions too), or with a way out still. If it would catch an
+  // enemy but it stands in the blast itself: st.shot, get clear first (shotS: the board as it would burn
+  // once fired; pickGoal() and refuge() rate the cells out of it).
+  const shotS = new Int32Array(N);
+  function fire(g, p, st, cx, cy, here, speed, lead, ox, oy) {
+    let ob = null;
+    for (const b of g.bombs) if (b && !b.dead && b.owner === p.slot && b.kind === 1 && b.motion < 2 && (!ob || b.dropTick < ob.dropTick)) ob = b;
+    if (!ob) return false;
+    nExtra = 0; fireNow = ob;
+    danger(g, p, S2, E2);
+    fireNow = null;
+    let hits = 0;
+    for (const o of g.players) if (enemy(g, p, o) && S2[idx(AB.cellX(o.x), AB.cellY(o.y))] <= 2) hits++;
+    if (!hits && g.tick - ob.dropTick <= P.fireAfter) return false;
+    if (S2[here] >= NEVER) return true;
+    if (S2[here] > 2 && safeCells(S2, risk, queB, search(g, cx, cy, speed, lead, S2, E2, distB, prevB, queB, timeB, -1, walk, ox, oy), 1)) return true;
+    if (hits && P.shot) { st.shot = true; shotS.set(S2); }
+    return false;
+  }
+
   // what the last call saw and chose (for looking into its decisions: nothing reads this back), and
   // what the last bomb it laid did to the enemies (pressed: bombWorth()'s)
   const seen = { tick: 0, slot: -1, here: -1, goal: -1, danger: NEVER, bits: 0, pressed: 0, S0, E0, S1, risk };
@@ -626,6 +654,7 @@
       if (S1[c] < NEVER) sc -= 250;
       if (c === st.goal) sc += 50;
       if (c === st.target && P.keepOn) sc += distA[c] * 100;   // (where it was going anyway, if that will do)
+      if (st.shot && shotS[c] >= NEVER) sc += P.shot >> 1;          // (clear of its remote bomb, to fire it)
       const ex = g.extras[c];
       if (ex && ex.t === 'conveyor') sc -= P.conveyor;
       const x = c % COLS, y = (c - x) / COLS;
@@ -1045,6 +1074,7 @@
       if (c === st.target) sc += P.stick;
       if (c === st.trap) sc += st.trapV;
       if (c === st.kick) sc += kickBoost(g, st, st.kickV) >> 1;
+      if (st.shot && shotS[c] >= NEVER) sc += P.shot;
       if (walls && ringOf[c] < walls) sc -= P.walls;
       sc += ((Math.imul(c + 1, 2654435761) ^ Math.imul(p.slot + 7, 40503) ^ Math.imul(era + 1, 69069)) >>> 0) % (P.jitter + 1);
       if (sc > bs) { bs = sc; best = c; }

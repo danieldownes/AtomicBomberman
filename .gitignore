@@ -25,3 +25,5 @@ output/hd/repair/*-candidate.png
 tools/__pycache__/
 # downloaded source recordings (tools/port_sounds/README.md says where from)
 output/sounds/
+# training runs of tools/ai_tune.cjs: frozen code, state and logs
+output/training/
