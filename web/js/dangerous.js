@@ -36,52 +36,54 @@
   const SLIDE = Math.ceil(AB.CW * AB.SUB / K.KICK_SPEED);          // ticks a kicked bomb takes per cell
   const FLY = AB.SUB / K.PUNCH_SPEED;                               // ticks a thrown bomb takes per pixel
 
-  // What it weighs up, in points (AB.AI.dangerousParams, so tools/ai_arena.cjs can try others).
+  // What it weighs up, in points (AB.AI.dangerousParams, so tools/ai_arena.cjs can try others). Most were
+  // tuned by play with tools/ai_tune.cjs, hence the odd numbers; pen, penned and penSick are set by hand, so
+  // that it doesn't wait penned in where people can see it.
   const P = {
     slack: 6,          // ticks to keep clear of a flame either side, walking through its cell
-    threatDist: 4,     // an enemy this many steps away might lay a bomb next: don't be trappable by it
+    threatDist: 2,     // an enemy this many steps away might lay a bomb next: don't be trappable by it
     approach: 1,       // ... and one might take a step nearer first (0: only where they stand)
-    kill: 3000,        // a bomb that leaves an enemy no way out
-    squeeze: 600,      // ... or one way out (half that for two)
-    harass: 200,       // ... or just makes an enemy run (they make mistakes on the run)
-    cut: 40,           // ... and per safe cell an enemy loses (of the first 12), short of cornering them
-    brick: 150,        // each brick a bomb breaks
-    burnItem: 300,     // each good power-up it would burn
-    layAt: 150,        // lays a bomb worth at least this
-    bombGap: 12,       // ticks between bombs
-    item: 600,         // a power-up worth having (ITEM scales it)
-    spot: 100,         // a cell to bomb from: per brick its blast would break (if it could get away)
-    hunt: 250,         // ... and per enemy it would catch in the blast
-    near: 100,         // per step closer than four to an enemy
-    endgame: 2,        // hunting counts this many times over with one enemy left, or under 45 s to go
-    exposed: 200,      // a cell in a corridor a nearby enemy could catch it in with a bomb laid now
-    deadEnd: 150,      // a cell with one way out, with an enemy about
-    conveyor: 80,      // a conveyor (it can't stand still on one)
-    far: 15,           // per step away
-    crowd: 100,        // other players there or heading there
-    stick: 80,         // the cell it was already heading for
+    kill: 1964,        // a bomb that leaves an enemy no way out
+    squeeze: 432,      // ... or one way out (half that for two)
+    harass: 83,        // ... or just makes an enemy run (they make mistakes on the run)
+    cut: 54,           // ... and per safe cell an enemy loses (of the first 12), short of cornering them
+    brick: 241,        // each brick a bomb breaks
+    burnItem: 247,     // each good power-up it would burn
+    layAt: 333,        // lays a bomb worth at least this
+    bombGap: 9,        // ticks between bombs
+    item: 1548,        // a power-up worth having (ITEM scales it)
+    spot: 124,         // a cell to bomb from: per brick its blast would break (if it could get away)
+    hunt: 114,         // ... and per enemy it would catch in the blast
+    near: 96,          // per step closer than four to an enemy
+    endgame: 1,        // hunting counts this many times over with one enemy left, or under 45 s to go
+    exposed: 182,      // a cell in a corridor a nearby enemy could catch it in with a bomb laid now
+    deadEnd: 188,      // a cell with one way out, with an enemy about
+    conveyor: 159,     // a conveyor (it can't stand still on one)
+    far: 9,            // per step away
+    crowd: 92,         // other players there or heading there
+    stick: 21,         // the cell it was already heading for
     jitter: 60,        // a tie-break of its own (changes every two seconds)
-    walls: 400,        // a cell the closing walls will fill
-    fireAfter: 60,     // fires a remote bomb that has caught nobody after this many ticks
-    shot: 600,         // a cell out of the blast of its remote bomb, with an enemy in it, to fire from
+    walls: 386,        // a cell the closing walls will fill
+    fireAfter: 86,     // fires a remote bomb that has caught nobody after this many ticks
+    shot: 886,         // a cell out of the blast of its remote bomb, with an enemy in it, to fire from
     keepOn: 1,         // running from a blast, keeps on to where it was going if that will do (0: the nearest safe cell)
-    runLay: 300,       // running from a bomb, lays another on the way if it does this much to the enemies (0: never)
+    runLay: 459,       // running from a bomb, lays another on the way if it does this much to the enemies (0: never)
     dodge: 1,          // knows how enemies get out of a corner: wait for a blast to pass and go on through after, or
                        // kick or punch the bomb away (0: thinks they can't)
     blind: 1,          // knows the game's other computer players don't see where a kicked bomb is going (or a
                        // punched one, till it lands)
     kickWait: 90,      // stands by a bomb up to this many ticks to kick it at the best moment (0: kicks at once)
-    kickLate: 100,     // ... and a kick counts this much more (percent) once the bricks are all gone, pro rata
+    kickLate: 86,      // ... and a kick counts this much more (percent) once the bricks are all gone, pro rata
     kickSpot: 1,       // goes round behind a bomb to kick it at someone (0: kicks only bombs it happens to be by)
-    early: 50,         // for the first this many seconds of a round...
-    greedy: 200,       // ... power-ups, and bricks (which hide them), count this much (percent): they win the late game
-    sick: 300,         // a cell next to a player with a disease, which it would catch (0: doesn't mind)
+    early: 10,         // for the first this many seconds of a round...
+    greedy: 400,       // ... power-ups, and bricks (which hide them), count this much (percent): they win the late game
+    sick: 731,         // a cell next to a player with a disease, which it would catch (0: doesn't mind)
     pen: 6,            // able to get to this few cells, it's penned in ...
     penned: 60,        // ... and after this many ticks goes over what keeps it there (0: never)
     penSick: 5,        // ... and past a disease after this many times as long (0: never)
-    lateAt: 65,        // from this many seconds left, with walls to come, a cell they will fill isn't one to
+    lateAt: 41,        // from this many seconds left, with walls to come, a cell they will fill isn't one to
                        // stay in, for it or for an enemy (0: it keeps clear of them only while they fall)
-    inner: 300,        // ... and a cell inside, by an enemy outside, cuts them off from the middle
+    inner: 109,        // ... and a cell inside, by an enemy outside, cuts them off from the middle
     warps: 1,          // goes through warp holes, out at the other end (0: keeps off them)
   };
   // what each power-up is worth to it, in hundredths of P.item; below zero: keep off

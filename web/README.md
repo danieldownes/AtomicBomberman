@@ -189,6 +189,8 @@ types).
   * It fires its remote bombs when someone stands in the blast, stepping out of the way first if it's in
     it too (chain reactions included), and punches bombs at people. A punched bomb that lands on a head
     stuns them, usually for long enough.
+  * How much each of these counts was trained by play against Hards and Originals
+    (`tools/ai_tune.cjs`), all but how long it waits penned in.
 `node tools/ai_arena.cjs` plays computer-only rounds headless to compare them (see ../tools/README.md).
 Measured with it on the 11 default arenas, counting the rounds someone won:
 
@@ -197,12 +199,12 @@ Measured with it on the 11 default arenas, counting the rounds someone won:
   * Original beat Medium 66% to 34% and Easy 76% to 24%.
   * Hard beat Original 58% to 42%.
 * **One on one:** Hard beat Original 60% to 40%.
-* **One Dangerous against three Hards:** Dangerous won 65% of 2,000 rounds, which is 75% of the rounds
+* **One Dangerous against three Hards:** Dangerous won 74% of 2,000 rounds, which is 81% of the rounds
   someone won (an even share is 25%).
-* **Dangerous one on one against Hard:** 84% of 1,000 rounds (89%).
-* **One Dangerous against three Originals:** 72% of 1,000 rounds (78%).
+* **Dangerous one on one against Hard:** 90% of 1,000 rounds (92%).
+* **One Dangerous against three Originals:** 81% of 1,000 rounds (87%).
 
-Per player per tick, Original thinks for about 1 µs, Hard for 9 and Dangerous for 25.
+Per player per tick, Original thinks for about 1 µs, Hard for 9 and Dangerous for about 40.
 
 In network games the host sets one skill for all the computer players.
 

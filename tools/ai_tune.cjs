@@ -9,7 +9,8 @@
 //
 // A training run is a few sessions in a row, the first starting from P, each later one from a random
 // spread about it, so that they look in different places. The whole state goes to the --json file after
-// every generation, and --resume carries on from it: a run can be stopped (Ctrl+C) and started again.
+// every generation, and --resume carries on from it: a run can be stopped (Ctrl+C, a crash, a power cut)
+// and started again, losing only the generation it was in.
 //
 //   node tools/ai_tune.cjs --sessions 3 --generations 30 --rounds 300 --json tune.json
 //   node tools/ai_tune.cjs --resume tune.json
@@ -31,12 +32,12 @@ const { runArena, loadGame } = require('./ai_arena.cjs');
 // the weights tuned, each scaled from P's value by 2^x (x starts at 0), rounded and kept within [lo, hi]
 // (the switches, 0 or 1, stay as they are)
 const TUNE = {
-  slack: [2, 14], threatDist: [2, 8], kill: [500, 20000], squeeze: [100, 4000], harass: [0, 2000], cut: [0, 400],
+  slack: [2, 14], threatDist: [1, 8], kill: [500, 20000], squeeze: [100, 4000], harass: [0, 2000], cut: [0, 400],
   brick: [20, 1000], burnItem: [0, 2000], layAt: [20, 1000], bombGap: [4, 40],
   item: [100, 4000], spot: [10, 800], hunt: [20, 2000], near: [0, 800], endgame: [1, 6], exposed: [0, 2000],
   deadEnd: [0, 1000], conveyor: [0, 800], far: [2, 100], crowd: [0, 800], stick: [0, 800], walls: [50, 3000],
   fireAfter: [15, 300], shot: [0, 3000], runLay: [100, 3000], kickWait: [0, 200], kickLate: [0, 400],
-  early: [0, 150], greedy: [100, 400], sick: [0, 2000], pen: [3, 12], penned: [10, 600], penSick: [1, 20],
+  early: [0, 150], greedy: [100, 1600], sick: [0, 2000], pen: [3, 12], penned: [10, 600], penSick: [1, 20],
   lateAt: [0, 120], inner: [0, 2000],
 };
 const OPTIONS = ['sessions', 'generations', 'rounds', 'lineup', 'size', 'seed', 'workers', 'json', 'resume', 'only', 'sigma', 'spread', 'validate', 'vrounds'];
@@ -84,7 +85,14 @@ function toParams(S, x) {
   return p;
 }
 const show = (S, p) => S.names.filter(k => p[k] !== S.base[k]).map(k => `--param ${k}=${p[k]}`).join(' ') || '(P as it stands)';
-const save = (S) => { if (S.args.json) fs.writeFileSync(S.args.json, JSON.stringify(S, null, 1)); };
+// the state goes to a temporary file, flushed to disk and renamed over the old one, so that a crash or a
+// power cut mid-save still leaves a whole state to resume from
+const save = (S) => {
+  if (!S.args.json) return;
+  const tmp = `${S.args.json}.tmp`, fd = fs.openSync(tmp, 'w');
+  fs.writeSync(fd, JSON.stringify(S, null, 1)); fs.fsyncSync(fd); fs.closeSync(fd);
+  fs.renameSync(tmp, S.args.json);
+};
 
 // a session starts its cloud at P (the first) or at a random spread about it
 function startSession(S) {

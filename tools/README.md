@@ -162,7 +162,7 @@ To test the computer players:
     AI uses `Math.random` or the clock, or carries something over from one game to the next; in a
     network game, where every computer runs every AI, that would put the computers out of step.
   * The thinking times are only right with `--workers 1`: under Node 18 (WSL's, on Windows)
-    Dangerous takes about 25 µs per player per tick, Hard 9, Medium 3, Original 1 and Easy under 1. With more
+    Dangerous takes about 40 µs per player per tick, Hard 9, Medium 3, Original 1 and Easy under 1. With more
     workers they come out high, and the rounds stop getting faster from about 8 workers: 110,000 to
     145,000 ticks a second in all on a 12-core Ryzen 9 3900X, some 20 four-player rounds a second.
     Separate processes and Chrome's Web Workers stop at the same point, while plain arithmetic scales
@@ -197,7 +197,8 @@ To test the computer players:
     about it (`--spread`), so they look in different places.
   * The whole state goes to the `--json` file after every generation, and `--resume tune.json` carries
     on from it (add `--sessions` or `--generations` to make the run longer). Stop it with Ctrl+C at
-    any time.
+    any time. A crash or a power cut loses only the generation it was in, since a save is never left
+    half written.
   * A generation of 14 weightings and 300 rounds takes about 5 minutes on 16 workers. Check a
     champion against `P` on more seeds before writing it into `P`. `output/training/` (git-ignored)
     is the place for runs.
