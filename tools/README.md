@@ -198,7 +198,7 @@ To test the computer players:
   * The whole state goes to the `--json` file after every generation, and `--resume tune.json` carries
     on from it (add `--sessions` or `--generations` to make the run longer). Stop it with Ctrl+C at
     any time.
-  * A generation of 14 weightings and 300 rounds takes about 4 minutes on 16 workers. Check a
+  * A generation of 14 weightings and 300 rounds takes about 5 minutes on 16 workers. Check a
     champion against `P` on more seeds before writing it into `P`. `output/training/` (git-ignored)
     is the place for runs.
 
