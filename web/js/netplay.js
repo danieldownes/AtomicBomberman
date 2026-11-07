@@ -433,7 +433,7 @@
     let fwd = null;
     for (const m of room.members) {
       if (m === member || m.id === 'host' || member.direct.has(m.id) || m.direct.has(member.id)) continue;
-      if (!fwd) { fwd = b.slice(); fwd[0] = 2; }
+      if (!fwd) { fwd = b.slice(); if (fwd[0] !== 3) fwd[0] = 2; }      // (a resend stays one)
       sendGameTo(m, fwd);
     }
   }

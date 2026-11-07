@@ -42,7 +42,8 @@ needs no server of its own, so it works from GitHub Pages as it is.
 
 * The match uses the host's match settings. Team play and the Gold Bomberman roulette are off in network games.
 * Sounds, voices, music and graphics are cosmetic, so they stay each player's own choice.
-* Pause and Force Draw are off, because every computer has to stay in step. Esc then Y leaves.
+* Pause, Force Draw and F1 help are off, because every computer has to stay in step (the help page
+  would hold this computer's game, and everyone else's with it). Esc then Y leaves.
 * **F10 twice** forfeits the round for the players on your computer. It goes out with your next
   input (`AB.IN.FORFEIT`), so every computer drops them at the same tick.
 * **Only computer players left:** HURRY sounds, and 3 seconds later the walls close in four times
@@ -62,6 +63,8 @@ needs no server of its own, so it works from GitHub Pages as it is.
   and the rest hear it too, with a "!" marker (and the count) by that computer's players. From the
   third press on, a list of 15 sounds opens (hurry-ups, poops, disease groans, a couple of
   taunts): Up/Down picks one, bomb sends it to everyone, Esc closes the list.
+* The scores are the host's. Each round's start and the victory carry the host's tally, so a
+  computer that never saw the end of a round (see *After the round* below) still has every result.
 * Long distances play smoothly: each computer runs on with a guess for the others' keys and
   corrects itself when the real ones arrive (see *Rollback* below). Only if a computer's input
   stops arriving altogether (for about a quarter of a second or more) does the game hold and show
@@ -207,7 +210,7 @@ with "Could not reach the room host (a strict network may need a relay)."
 | `room {info}` | host to members and probes | state, host, members, pings, settings (every second and on change) |
 | `welcome {id}` / `reject {reason}` | host to joiner | accepted, or why not (version, in a game, full) |
 | `ping {ts}` / `pong {ts}` | host and member | round trip every second; the shown ping is smoothed |
-| `start {cfg}` | host to members | one round: number, seed, arena, rules, players (slot, name, owner computer, AI), computers, input delay, rollback limit |
+| `start {cfg}` | host to members | one round: number, seed, arena, rules, players (slot, name, owner computer, AI), computers, input delay, rollback limit, and from round 2 the scores so far |
 | `ready {round}` | member to host | arena loaded |
 | `go {round}` | host to members | everyone has loaded the arena picture and sound effects (or 45 s passed): start the clock. The host starts half its worst ping later, so all start together |
 | `ls {r, m:{t:'sum', tick, h}}` | each to all (via host) | checksum of a confirmed tick of round `r` |
@@ -216,7 +219,7 @@ with "Could not reach the room host (a strict network may need a relay)."
 | `g {d}` | any (via host) | an input packet, while no game channel is open |
 | `nudge {n, pick}` | member to host to others | pressed bomb on the results screen (`pick`: a sound from the list, or -1) |
 | `notice {text}` | host to members | a message for the top of the screen (someone rejoined) |
-| `victory` | host to members | the match is won: show the victory screen |
+| `victory {score}` | host to members | the match is won: show the victory screen (with the host's final scores) |
 | `end {reason?}` | host to members | match over, back to the room; with a reason, the room has closed |
 | `leave` | member to host | leaving (also sent when the tab closes) |
 
@@ -232,6 +235,8 @@ late. Now it uses **rollback**, the way fighting games do it:
   * AI players are computed inside `step()` from the shared state and seeded RNG, so nothing is
     sent for them. Only input bits travel: one byte per human player per tick.
   * `game.saveState()` / `loadState()` copy the whole simulation (7-14 KB, about 0.1 ms).
+    `loadState()` also removes what the save doesn't have: a field first set later (such as
+    `finaleT`, from when only computer players are left) would otherwise outlive the rollback.
 * **Short input delay.** Local input for tick `t` is used at `t + delay`. The host picks the delay
   each round from the worst ping: 1 tick under 80 ms, 2 under 200 ms, 3 under 350 ms, else 4
   (17-67 ms). `?netdelay=N` overrides it for testing.
@@ -256,23 +261,33 @@ late. Now it uses **rollback**, the way fighting games do it:
   is how far ahead one is, with the latency cancelled out. A computer more than 2 ticks ahead
   skips an occasional frame, one that has fallen behind (a background tab, a hiccup) runs extra
   ticks, so all run at 60 ticks a second together.
-* **Packets** (type 1 direct, 2 passed on by the host), binary:
+* **Packets** (type 1 direct, 2 passed on by the host, 3 a resend after the round), binary:
   `u8 type, u8 round, u8 source, u8 computers, u32 sender's tick`, then per computer
   `u32 newest tick I have all of its inputs up to, i16 lead x8`, then
   `u32 first tick, u16 count, u8 players`, and `count x players` input bytes: everything since the
   oldest tick some other computer hasn't confirmed. Sent every frame: about 7-8 KB/s each way.
 * **Final ticks.** The host decides when a computer has left, so a member's input only counts as
   final once the host has it too. A tick whose inputs are all final can't change any more.
+* **After the round.** A computer that has seen the end confirmed stays on the game screen a few
+  seconds, then goes to the results, where nothing runs the game any more. Until the next round
+  starts it sends its last inputs again five times a second (type 3; its clock has stopped, so the
+  others leave these out of time sync). Without them, a computer whose last packets were lost
+  would wait for them for good, and miss that round's result.
 * **Desync checks.** Every 60 ticks the checksum of the final state goes to everyone, and any
-  mismatch stops the round with a message. (It never happened in testing.)
+  mismatch stops the round with a message. A member sends one only once the host has its own
+  inputs up to that tick too: a host that times it out cuts it off after the last of them it has,
+  so later ticks could still change, and its checksum would look like a desync to everyone else.
 * **Drops.** When a computer leaves, the host cuts it off at the tick after the last input of it the
   host has, and sends its copy of the last inputs along. Every computer then turns those players
   into AIs (or kills them) inside the game at that tick, rolling back to it if needed.
 * **Testing.** `?netsim=oneway,jitter,loss` (ms, ms, 0..1) on each computer delays incoming
   messages and drops game packets, e.g. `?netsim=150,20,0.02` on both for a 300 ms ping.
-  `AB.net.selfTest()` (browser console, or `test/` in Node) runs three computers through a host with
-  latency, jitter, loss and a drop, and compares every confirmed checksum with a plain run of the
-  same inputs.
+  `AB.net.selfTest()` (browser console) runs three computers through a host with latency, jitter,
+  loss and a drop, and compares every confirmed checksum with a plain run of the same inputs.
+  `node tools/net_check.cjs` does much more, headless: each computer with its own copy of the code,
+  every AI, lag spikes, blackouts, background tabs, drops, timeouts, forfeits, ten players, drifting
+  clocks; it compares the whole state of every confirmed tick with a replay, and checks every
+  computer gets to see the end (see tools/README.md).
 
 Measured with two browsers on `?netsim=<oneway>,20,0.02` (both moving the whole time, 25 s):
 
@@ -358,4 +373,8 @@ profiles (or one normal and one private window) at
   `node tools/ai_arena.cjs` plays its last rounds twice and says so if they come out differently.
 * Keep floating point out of the simulation. Positions, timers and speeds are integers. Only
   cosmetic values, such as the height of a thrown bomb's arc, use `Math.sin`.
+* What changes during a round lives in the game (`this.*` in js/game.js, `p.ai` for a computer
+  player), so a rollback restores it. Module-level scratch is fine if each call fills it before
+  reading it, and caches go in `_`-prefixed fields (`g._dangerousKey`), which a restore drops.
+  `node tools/net_check.cjs` finds anything that breaks this.
 * Cosmetic choices, such as which taunt or explosion sample plays, can stay local and random.

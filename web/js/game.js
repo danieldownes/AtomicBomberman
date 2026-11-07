@@ -1164,7 +1164,8 @@
     loadState(st) {
       const c = structuredClone(st), r = c.rng;
       delete c.rng;
-      for (const k in this) if (k[0] === '_') delete this[k];
+      // (also what was first set after the save, such as finaleT: left over, a rollback would keep it)
+      for (const k of Object.keys(this)) if (!STATE_SKIP.has(k) && !(k in c)) delete this[k];
       Object.assign(this, c);
       this.rng.s = r;
       this.events = [];

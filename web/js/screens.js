@@ -747,7 +747,8 @@
   });
 
   SC.register('game', {
-    help: 'manual',
+    // (not in a network round: the help page would hold this computer's game, and everyone else's with it)
+    get help() { return this.net ? null : 'manual'; },
     enter(arg) {
       arg = arg || {};
       if (arg.demo) { AB.match = { wins: {}, kills: {}, round: 1, players: demoPlayers(), demo: true }; }

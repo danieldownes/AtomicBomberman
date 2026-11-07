@@ -122,7 +122,7 @@
       case 'start': NM.start(ev.cfg); break;
       case 'go': NM.goRound = ev.round; break;
       case 'drop': NM.applyDrop(ev); break;
-      case 'victory': if (AB.match && AB.match.net) SC.go('victory', AB.matchWinner()); break;
+      case 'victory': if (AB.match && AB.match.net) { NM.takeScore(ev.score); SC.go('victory', AB.matchWinner()); } break;
       case 'end':
         if (ev.reason) { NM.notice = ev.reason; NP.leave(); NM.reset(); SC.go('network'); }
         else { NM.reset(); SC.go('room'); }
@@ -202,7 +202,7 @@
     if (cfg.round === 1) { NM.goRound = 0; NM.myReady = 0; }     // a new match: nothing carried over
     const S = Object.assign({}, AB.settings, cfg.sim);
     const M = AB.match = first ? { net: true, wins: {}, kills: {}, round: 0, players: [], demo: false } : AB.match;
-    if (first && cfg.score) { M.wins = Object.assign({}, cfg.score.wins); M.kills = Object.assign({}, cfg.score.kills); }
+    NM.takeScore(cfg.score);        // (for a computer that rejoins, or missed the end of the last round)
     M.round = cfg.round; M.S = S; M.over = false; M.soundSeed = cfg.seed;
     AB.audio.forceProfile(cfg.sim.sound || null);       // the host's sounds, the same on every computer
     M.players = cfg.players.map(p => Object.assign({}, p, { control: p.ai ? 'ai' : p.owner === me ? p.control : 'net' }));
@@ -210,6 +210,15 @@
     for (const m of (NP.room ? NP.room.members : [])) m.ready = false;
     SC.go('glue', { level: cfg.level, scheme: cfg.sim.scheme, net: cfg.round, soundSeed: cfg.seed, then: () => SC.go('game', { net: cfg }) });
   };
+  // the host's scores so far, with each round and the victory: a computer that never saw the end of a
+  // round confirmed (it was still waiting for the last inputs when the host moved on) would be short of it
+  NM.takeScore = function (score) {
+    const M = AB.match;
+    if (!M || !M.net || !score || typeof score.wins !== 'object' || typeof score.kills !== 'object') return;
+    M.wins = Object.assign({}, score.wins); M.kills = Object.assign({}, score.kills);
+  };
+  // after a round, until the next one starts, this computer's last inputs go out again (js/net.js resend)
+  setInterval(() => { if (NM.session && SC.name() !== 'game') NM.session.resend(); }, 200);
   // after loading: tell the host; the host starts everyone together once all are loaded (or after 12 s)
   NM.ready = function (round) {
     NM.readyAt = performance.now();
@@ -286,7 +295,7 @@
   // results / victory: only the host moves the match on
   NM.hostContinue = function (winner) {
     if (!NP.isHost()) return;
-    if (winner) { NP.send({ t: 'victory' }); SC.go('victory', winner); }
+    if (winner) { NP.send({ t: 'victory', score: { wins: AB.match.wins, kills: AB.match.kills } }); SC.go('victory', winner); }
     else NM.hostStart(AB.match.round + 1);
   };
   NM.hostEnd = function () {

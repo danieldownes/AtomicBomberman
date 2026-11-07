@@ -12,7 +12,8 @@
 //
 // Packets (binary, unordered channel; every packet repeats all inputs the others haven't confirmed,
 // so a lost packet costs nothing):
-//   u8 type=1, u8 round, u8 source computer, u8 computers, u32 sender's tick,
+//   u8 type (1; 2 passed on by the host; 3 a resend after the round), u8 round, u8 source computer,
+//   u8 computers, u32 sender's tick,
 //   per computer: u32 newest tick I have all of its inputs up to (ack), i16 lead x8 (time sync),
 //   u32 first tick, u16 count, u8 players on the source computer, then count x players input bytes.
 // Checksums of confirmed ticks go over the reliable channel (desync detection).
@@ -200,14 +201,15 @@
     takeEvents() { const e = this.events; this.events = []; return e; }
 
     // ---- packets ----
-    sendPacket() {
+    // type 1; 3 from resend()
+    sendPacket(type = 1) {
       const me = this.me, ns = this.slotsOf[me].length;
       let first = this.contig[me] + 1;
       for (let c = 0; c < this.n; c++) if (c !== me && this.dropped[c] === null) first = Math.min(first, this.ackOfMe[c] + 1);
       first = Math.max(first, 1);
       const cnt = AB.clamp(this.contig[me] - first + 1, 0, 600);
       const buf = new Uint8Array(8 + 6 * this.n + 7 + cnt * ns), dv = new DataView(buf.buffer);
-      dv.setUint8(0, 1); dv.setUint8(1, this.round); dv.setUint8(2, me); dv.setUint8(3, this.n); dv.setUint32(4, this.game.tick);
+      dv.setUint8(0, type); dv.setUint8(1, this.round); dv.setUint8(2, me); dv.setUint8(3, this.n); dv.setUint32(4, this.game.tick);
       let off = 8;
       for (let c = 0; c < this.n; c++) {
         dv.setUint32(off, this.contig[c]);
@@ -218,18 +220,23 @@
       for (let k = 0; k < cnt; k++) { const a = this.inp[me][first + k]; for (let j = 0; j < ns; j++) buf[off++] = a ? a[j] : 0; }
       this.o.send(buf);
     }
-    // type 1 came straight from its computer, type 2 was passed on by the host
+    // After the round, off the game screen (frame() no longer runs): the same inputs again, a few times a
+    // second until the next round, for a computer still waiting for them to see the end confirmed (its
+    // packets were lost or late). Without these it would wait for good, and miss the round's result.
+    // Type 3: its clock has stopped, so the others leave it out of time sync.
+    resend() { this.sendPacket(3); }
+    // type 1 came straight from its computer, type 2 was passed on by the host, type 3 is a resend()
     onPacket(bytes) {
       const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
       if (b.length < 8) return;
       const dv = new DataView(b.buffer, b.byteOffset, b.byteLength), type = dv.getUint8(0);
-      if ((type !== 1 && type !== 2) || dv.getUint8(1) !== this.round) return;
+      if ((type !== 1 && type !== 2 && type !== 3) || dv.getUint8(1) !== this.round) return;
       const src = dv.getUint8(2), n = dv.getUint8(3);
       if (src === this.me || src >= this.n || n !== this.n || b.length < 8 + 6 * n + 7) return;
       this.stats.packets++;
       if (type === 1) this.directAt[src] = this.frames;
       // a passed-on copy arrives later than a direct one would: no use for time sync if there is one
-      const useLead = type === 1 || this.frames - this.directAt[src] > 60;
+      const useLead = type === 1 || (type === 2 && this.frames - this.directAt[src] > 60);
       const cur = dv.getUint32(4);
       let off = 8;
       for (let c = 0; c < n; c++) {
@@ -281,8 +288,10 @@
     }
 
     // ---- checksums of final ticks ----
+    // (a member waits until the host has its own inputs too: a host that times it out cuts it off after
+    // the last of them it has, so the ticks after could still change, and its sum would look like a desync)
     checkSums() {
-      const conf = this.confirmedTick;
+      const conf = this.me === 0 ? this.confirmedTick : Math.min(this.confirmedTick, this.ackOfMe[0]);
       for (let t = (Math.floor(this.lastSum / 60) + 1) * 60; t <= conf; t += 60) {
         const h = this.sums.get(t);
         this.lastSum = t;
@@ -323,7 +332,8 @@
     const loss = opt.loss !== undefined ? opt.loss : 0.05, delay = opt.delay || 3, dropAt = opt.dropAt || 0;
     const settings = AB.defaultSettings(); settings.playTime = 600; settings.lostNetToAI = true;
     const scheme = window.AB_DATA.schemes.basic;
-    const players = [0, 1, 2, 3].map(i => ({ slot: i, color: i, ai: i === 3 }));
+    // (the computer players think inside the simulation, so they go through rollback too; Hard takes over on a drop)
+    const players = [0, 1, 2, 3, 4].map(i => ({ slot: i, color: i, ai: i >= 3, aiLevel: ['original', 'dangerous'][i - 3] }));
     const slotsOf = [[0], [1], [2]];
     const mk = () => new AB.Game({ settings, scheme, level: 0, seed: 4242, players, match: {} });
     let rs = 99;
@@ -370,7 +380,7 @@
     const sums = {};
     for (let t = 1; t <= end; t++) {
       if (dropFrom === t) applyDrop(ref, slotsOf[2]);
-      const arr = new Int32Array(4);
+      const arr = new Int32Array(players.length);
       for (let c = 0; c < 3; c++) { if (dropFrom !== null && c === 2 && t >= dropFrom) continue; const a = S[live[0]].inp[c][t] || S[0].inp[c][t]; if (a) arr[slotsOf[c][0]] = a[0]; }
       ref.step(arr);
       if (t % 60 === 0) sums[t] = ref.checksum();
