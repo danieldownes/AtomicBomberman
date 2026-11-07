@@ -20,7 +20,7 @@
 'use strict';
 (function (AB) {
   const NP = AB.netplay = {};
-  NP.PROTO = 2;
+  NP.PROTO = 3;
   NP.ROOMS = 3;
   NP.MAX_PLAYERS = 10;
   NP.MAX_COMPUTERS = 5;            // like the original
@@ -273,9 +273,13 @@
   };
 
   function baseRoom(n, host) {
+    const S = AB.settings, L = AB.AI.LEVELS;
+    const aiLevel = L.includes(S.netAILevel) ? S.netAILevel : 'hard', own = Array.isArray(S.netAILevels) ? S.netAILevels : [];
     return {
-      n, host, me: host ? 'host' : null, members: [], state: 'waiting', ais: AB.settings.netAIs | 0, log: [], connecting: true, aiOrder: NP.shuffledAIOrder(),
-      aiLevel: AB.AI.LEVELS.includes(AB.settings.netAILevel) ? AB.settings.netAILevel : 'hard',
+      n, host, me: host ? 'host' : null, members: [], state: 'waiting', ais: S.netAIs | 0, log: [], connecting: true, aiOrder: NP.shuffledAIOrder(),
+      // the skill set for all computer players (and for players whose computer leaves), and each one's own
+      aiLevel, aiLevels: Array.from({ length: NP.MAX_PLAYERS }, (_, i) => (L.includes(own[i]) ? own[i] : aiLevel)),
+      teams: NP.TEAM_MODES.includes(S.netTeams) ? S.netTeams : 'off', teamPick: {},
       say(t) { this.log.push(t); if (this.log.length > 5) this.log.shift(); },
       fail: null,
     };
@@ -313,7 +317,7 @@
     let arenas = 0, one = null; for (let i = 0; i < AB.LEVELS; i++) if (AB.arenaOn(S, i)) { arenas++; one = i; }
     return { scheme: AB.schemeSummary(S), arenas: arenas === 1 ? AB.levelName(one) : arenas + ' of ' + AB.LEVELS, wins: S.winsNeeded, byKills: !!S.winByKills,
              time: S.playTime, randomStart: !!S.randomStart, conveyor: S.conveyorSpeed | 0, stomped: !!S.stompedDetonate,
-             enclosement: S.enclosement | 0, diseases: !!S.diseasesDestroyable, lostToAI: !!S.lostNetToAI, sound: NP.soundProfile() };
+             enclosement: S.enclosement | 0, diseases: !!S.diseasesDestroyable, lostToAI: !!S.lostNetToAI, gold: !!S.goldBomberman, sound: NP.soundProfile() };
   };
   // the sounds a network match uses on every computer: the host's choice in Match settings
   NP.soundProfile = function () {
@@ -322,13 +326,80 @@
              variety: A.VARIETY.includes(S.netVariety) ? S.netVariety : A.VARIETY.includes(S.soundVariety) ? S.soundVariety : 'normal' };
   };
   NP.versionClash = (commit) => !!(commit && AB.VERSION.commit && commit !== AB.VERSION.commit);
+
+  // ---------------------------------------------------------------- the line-up (host)
+  // Who plays the next match, in slot order: each computer's players, then the computer players. A
+  // player's key says who they are from one match to the next (a member's id and which of its players,
+  // or which computer player): teams chosen by the host and the Gold Bomberman prize go by it.
+  // Teams: off, humans against computers (team 1 and team 2), or chosen by the host (room.teamPick).
+  NP.TEAM_MODES = ['off', 'humans', 'pick'];
+  function teamOf(room, p) {
+    if (room.teams === 'humans') return p.ai ? 1 : 0;
+    if (room.teams === 'pick') { const t = room.teamPick[p.key]; return t === 0 || t === 1 ? t : p.ai ? 1 : 0; }
+    return 0;
+  }
+  NP.roster = function (room) {
+    const cols = NP.assignColours(room.members, room.ais), out = [];
+    for (const m of room.members) m.players.forEach((p, j) => out.push({ key: m.id + ':' + j, name: p.name, owner: m.id, control: p.control, ai: false }));
+    for (let i = 0; i < room.ais; i++) out.push({ key: 'ai:' + i, name: 'Computer ' + (i + 1), ai: true, aiLevel: room.aiLevels[i] });
+    out.forEach((p, i) => { p.color = cols[i]; p.team = teamOf(room, p); });
+    return out.slice(0, NP.MAX_PLAYERS);
+  };
+  // what keeps the host from starting: too few players, or a team with nobody on it
+  NP.lineupProblem = function (room) {
+    const list = NP.roster(room);
+    if (list.length < 2) return 'Need at least two players: wait for someone to join, or add computer players.';
+    if (room.teams !== 'off' && new Set(list.map(p => p.team)).size < 2) {
+      return room.teams === 'humans' ? 'Humans against computers needs computer players: add some.' : AB.msg(48, 'Must have at least one player on each team!');
+    }
+    return null;
+  };
+  // the host's changes, kept for its next room too, and shown to everyone straight away
+  function lineupChanged(room) {
+    const S = AB.settings;
+    S.netAIs = room.ais; S.netAILevel = room.aiLevel; S.netAILevels = room.aiLevels.slice(); S.netTeams = room.teams;
+    AB.saveSettings(); sendRoom(room);
+  }
+  const hostRoom = () => (NP.room && NP.room.host ? NP.room : null);
+  NP.setAIs = function (n) {
+    const room = hostRoom(); if (!room) return false;
+    const was = room.ais;
+    room.ais = AB.clamp(n, 0, NP.MAX_PLAYERS - humanCount(room));
+    if (room.ais === was) return false;
+    room.aiOrder = NP.shuffledAIOrder();       // new colours for the computer players
+    for (let i = was; i < room.ais; i++) room.aiLevels[i] = room.aiLevel;      // (new ones get the skill set for all)
+    lineupChanged(room); return true;
+  };
+  // d: -1 or 1 through AB.AI.LEVELS; i: one computer player, or all of them (undefined)
+  NP.stepAILevel = function (d, i) {
+    const room = hostRoom(); if (!room) return;
+    const L = AB.AI.LEVELS, step = (l) => L[(L.indexOf(l) + d + L.length) % L.length];
+    if (i === undefined) { room.aiLevel = step(room.aiLevel); room.aiLevels.fill(room.aiLevel); }
+    else room.aiLevels[i] = step(room.aiLevels[i]);
+    lineupChanged(room);
+  };
+  NP.stepTeams = function (d) {
+    const room = hostRoom(); if (!room) return;
+    const M = NP.TEAM_MODES;
+    room.teams = M[(M.indexOf(room.teams) + d + M.length) % M.length];
+    lineupChanged(room);
+  };
+  // one player to the other team (humans against computers becomes teams chosen, starting from it)
+  NP.toggleTeam = function (key) {
+    const room = hostRoom(); if (!room || room.teams === 'off') return;
+    const list = NP.roster(room), p = list.find(q => q.key === key); if (!p) return;
+    if (room.teams === 'humans') { room.teamPick = {}; for (const q of list) room.teamPick[q.key] = q.team; room.teams = 'pick'; }
+    room.teamPick[key] = p.team ? 0 : 1;
+    lineupChanged(room);
+  };
+
   function roomInfo(room) {
     const cols = NP.assignColours(room.members, room.ais);
     let k = 0;
     return {
-      n: room.n, state: room.state, hostName: room.members[0] && room.members[0].name, ais: room.ais, aiLevel: room.aiLevel,
+      n: room.n, state: room.state, hostName: room.members[0] && room.members[0].name, ais: room.ais, aiLevel: room.aiLevel, teams: room.teams,
       rejoin: [...(room.departed || new Map()).keys()].map(NP.cidTag),
-      aiColours: cols.slice(cols.length - room.ais),
+      roster: NP.roster(room).map(p => ({ key: p.key, name: p.name, color: p.color, team: p.team, ai: p.ai, aiLevel: p.aiLevel, owner: p.owner })),
       ver: AB.VERSION.text, commit: AB.VERSION.commit,
       members: room.members.map(m => ({ id: m.id, name: m.name, peer: m.peer, ping: Math.round(m.ping || 0),
         voice: m.id === 'host' ? AB.voice.active() : !!m.voice, mic: m.id === 'host' ? AB.voice.mic : m.mic || '', muted: m.id === 'host' ? AB.voice.muted : !!m.muted, players: m.players.map(p => ({ name: p.name, color: cols[k++] })) })),
@@ -488,7 +559,7 @@
         room.lastSeen = now();
         if (m.t === 'reject') { clearTimeout(to); room.fail(m.reason); return; }
         if (m.t === 'welcome') { clearTimeout(to); done = true; room.connecting = false; room.me = m.id; room.rejoin = !!m.rejoin; room.say(m.rejoin ? 'Back in room ' + n + ': you play again from the next round.' : 'Joined room ' + n + '.'); startMemberTimer(room); openHostGame(room); AB.voice.start(); voiceTip(room); res(room); return; }
-        if (m.t === 'room') { room.info = m.info; room.state = m.info.state; room.members = m.info.members; room.ais = m.info.ais; room.aiLevel = m.info.aiLevel || 'hard'; emit({ t: 'room' }); updateMesh(room); syncVoice(); return; }
+        if (m.t === 'room') { room.info = m.info; room.state = m.info.state; room.members = m.info.members; room.ais = m.info.ais; room.aiLevel = m.info.aiLevel || 'hard'; room.teams = m.info.teams || 'off'; emit({ t: 'room' }); updateMesh(room); syncVoice(); return; }
         if (m.t === 'ping') { c.send({ t: 'pong', ts: m.ts }); return; }
         if (m.t === 'talk') { AB.voice.setTalking(m.id, !!m.on); return; }
         if (m.t === 'g') { const b = toBytes(m.d); if (b && AB.netmatch) AB.netmatch.onGamePacket(b); return; }
@@ -705,12 +776,16 @@
       players = players.filter(p => !p.benched).sort((a, b) => a.slot - b.slot);
     } else {
       room.benched = []; room.departed = new Map();       // a new match: nobody to bring back
-      const cols = NP.assignColours(room.members, room.ais);
-      for (const m of room.members) for (const p of m.players) {
-        if (players.length >= NP.MAX_PLAYERS) break;
-        players.push({ slot: players.length, color: cols[players.length], team: 0, ai: false, name: p.name, owner: m.id, control: p.control });
-      }
-      for (let i = 0; i < room.ais && players.length < NP.MAX_PLAYERS; i++) players.push({ slot: players.length, color: cols[players.length], team: 0, ai: true, aiLevel: room.aiLevel, name: 'Computer ' + (i + 1), owner: null, control: 'ai' });
+      NP.roster(room).forEach((p, slot) => players.push(p.ai
+        ? { slot, key: p.key, color: p.color, team: p.team, ai: true, aiLevel: p.aiLevel, name: p.name, owner: null, control: 'ai' }
+        : { slot, key: p.key, color: p.color, team: p.team, ai: false, name: p.name, owner: p.owner, control: p.control }));
+    }
+    // Gold Bomberman: the last match's winner starts this one with the prize the roulette gave them
+    let bonus = null;
+    if (round === 1) {
+      const p = room.gold && players.find(q => q.key === room.gold.key);
+      if (p) bonus = { slot: p.slot, pw: room.gold.pw };
+      room.gold = null;
     }
     // input delay from the worst ping: a little delay saves a lot of corrections (js/net.js)
     const pings = room.members.slice(1).map(m => m.ping || 0).sort((a, b) => b - a), maxPing = pings[0] || 0;
@@ -725,10 +800,11 @@
                      'winsNeeded', 'winByKills', 'lostNetToAI', 'scheme']) sim[k] = S[k];
     sim.scheme = AB.pickScheme(S);
     sim.countdown = S.countdown !== false;      // one of the host's ticked schemes for this round
-    sim.teamPlay = false; sim.goldBomberman = false;
+    // (the teams are each player's own, from the line-up, and stay so for the whole match)
+    sim.teamPlay = room.teams !== 'off'; sim.goldBomberman = !!S.goldBomberman;
     sim.aiFinale = true;           // only computer players left: fast walls (js/game.js updateAIFinale)
     // the host's sound preset and variety, for everyone (js/audio.js forceProfile)
     sim.sound = NP.soundProfile();
-    return { round, seed: (Math.random() * 0xffffffff) >>> 0, level: AB.pickArena(S), sim, players, delay, maxRollback, computers, aiLevel: room.aiLevel };
+    return { round, seed: (Math.random() * 0xffffffff) >>> 0, level: AB.pickArena(S), sim, players, delay, maxRollback, computers, aiLevel: room.aiLevel, bonus };
   };
 })(window.AB);

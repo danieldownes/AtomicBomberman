@@ -100,12 +100,13 @@ There is nothing to install or host.
   it.
 * The lobby has three fixed rooms. Pick an empty one to host it, or a waiting one to join. Each
   room shows who is in it, their pings and the host's settings.
-* In the room, the host picks the number of computer players and their skill, and opens Match
-  settings. That has
-  the arenas, scheme, wins, play time and gameplay options, as in local play's Arena & Match.
-  Everyone sees the choices as they change.
-* Up to five computers and ten players can play, as in the original. Team play and the Gold
-  Bomberman roulette are off online.
+* In the room, the host picks the number of computer players, and under **Skill and teams** each
+  one's skill and the teams: none, humans against computers, or chosen player by player. Match
+  settings has the arenas, scheme, wins, play time, Gold Bomberman and gameplay options, as in local
+  play's Arena & Match. Everyone sees the choices as they change.
+* Up to five computers and ten players can play, as in the original. With Gold Bomberman on, the
+  host spins the roulette for everyone after the match, and the winner starts the next one with
+  the prize.
 * Every computer runs the same simulation, and only key presses are sent. Each computer guesses
   the others' keys until they arrive and corrects itself (rollback), so play stays smooth even at
   a 300-500 ms ping. F9 shows the network figures. If someone leaves, their players carry on as
@@ -206,7 +207,7 @@ Measured with it on the 11 default arenas, counting the rounds someone won:
 
 Per player per tick, Original thinks for about 1 µs, Hard for 9 and Dangerous for about 40.
 
-In network games the host sets one skill for all the computer players.
+In network games the host sets each computer player's skill (Room > Skill and teams).
 
 Hard, Medium and Easy each have their own random choices (seeded from the round and its slot, so
 network games stay in step), and they keep out of each other's way: of equally near safe cells they take
@@ -317,7 +318,7 @@ These are under main menu > Options, next to the original settings.
   two rows and sized to fill the bar, whether there are 2 players or 10. A player who is out is
   crossed out.
 * **Only computer players left** (local and network games, not campaigns): once every human player
-  is out and at least two computer players remain, HURRY sounds, and 3 seconds later the walls
+  is out and at least two computer players remain (in team play, on both teams), HURRY sounds, and 3 seconds later the walls
   close in four times as fast and fill the arena (at once, if they are already closing in). An AI that wins by knocking out the last human
   just wins.
   * The lettering copies the style of the original's HURRY!! picture. The CD has no letters in that

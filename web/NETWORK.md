@@ -27,20 +27,36 @@ needs no server of its own, so it works from GitHub Pages as it is.
 * The room lists each computer, its players and its ping to the host. A room holds up to five
   computers and ten players, as in the original.
 * The host has a menu:
-  * **Computer players**: Left/Right.
-  * **Computer skill**: Easy, Medium, Original, Hard or Dangerous, for all of them. Players whose computer leaves
-    carry on at this skill too.
+  * **Computer players**: Left/Right. Enter opens Skill and teams.
+  * **Skill and teams** (everyone can open it, only the host changes it):
+    * how many computer players there are, and each one's skill: Easy, Medium, Original, Hard or
+      Dangerous (Left/Right on its line), or all of them at once. Players whose computer leaves
+      carry on at the skill set for all of them.
+    * **Teams**: off, **humans against computers** (everyone on a keyboard or joystick is team 1,
+      the computer players team 2), or **chosen by the host**: Enter on a player puts them on the
+      other team (starting from humans against computers).
+    * The room shows each player's team as a bar under their head, white for team 1 and red for
+      team 2, the colours they turn in the game.
   * **Match settings**: the local Arena & Match choices, plus the gameplay options a network match
     uses. These are the arenas, ticked schemes (with presets; the host picks one for each round), wins or kills needed, play time, random start, conveyor
-    speed, stomped bombs, enclosement depth, destroyable diseases and "Lost net players revert to
-    AIs".
-  * **Start the match**: at least two players are needed.
+    speed, stomped bombs, enclosement depth, destroyable diseases, "Lost net players revert to
+    AIs" and Gold Bomberman.
+  * **Start the match**: at least two players are needed, and with teams someone on each.
 * Everyone in the room sees the settings change as the host picks them. The settings are the host's
   own Options too, so they carry over to local play.
 
 **Match**
 
-* The match uses the host's match settings. Team play and the Gold Bomberman roulette are off in network games.
+* The match uses the host's match settings.
+* **Teams** score as in local team play: a round won by a team counts for all of its players, and
+  the match goes to the first team to the wins (or kills) needed. Each player keeps their team for
+  the whole match, and a player whose computer leaves carries on (as a computer player) on it.
+* **Gold Bomberman**: after the victory screen the host spins the roulette for everyone. The host
+  picks the prize and how fast the wheel starts, and sends both (`roulette {spin}`). Each computer
+  starts its wheel just far enough back that it stops on that prize, so everyone watches the same
+  spin. The winner (in team play the winning team's first player) starts the next match's first
+  round with the prize. The host keeps it by who the player is (their key), not their slot, so it
+  still finds them if the line-up changes. The room says who has it.
 * Sounds, voices, music and graphics are cosmetic, so they stay each player's own choice.
 * Pause, Force Draw and F1 help are off, because every computer has to stay in step (the help page
   would hold this computer's game, and everyone else's with it). Esc then Y leaves.
@@ -48,7 +64,8 @@ needs no server of its own, so it works from GitHub Pages as it is.
   input (`AB.IN.FORFEIT`), so every computer drops them at the same tick.
 * **Only computer players left:** HURRY sounds, and 3 seconds later the walls close in four times
   as fast and keep going until the arena is full. This applies whether the humans died, forfeited or
-  left. If an AI's kill leaves a single player standing, that's an ordinary win.
+  left. If an AI's kill leaves a single player standing (with teams, a single team), that's an
+  ordinary win.
 * **Voice chat**: everyone in the room hears everyone else (see *Voice chat* below). V mutes you.
 * **Names and colours** (Room > Names and colours, everyone): change this computer's name, your
   players' names and colours without leaving the room. Everyone sees the change; a match in
@@ -210,7 +227,7 @@ with "Could not reach the room host (a strict network may need a relay)."
 | `room {info}` | host to members and probes | state, host, members, pings, settings (every second and on change) |
 | `welcome {id}` / `reject {reason}` | host to joiner | accepted, or why not (version, in a game, full) |
 | `ping {ts}` / `pong {ts}` | host and member | round trip every second; the shown ping is smoothed |
-| `start {cfg}` | host to members | one round: number, seed, arena, rules, players (slot, name, owner computer, AI), computers, input delay, rollback limit, and from round 2 the scores so far |
+| `start {cfg}` | host to members | one round: number, seed, arena, rules, players (slot, key, name, owner computer, team, AI and skill), computers, input delay, rollback limit, in round 1 the Gold Bomberman prize, and from round 2 the scores so far |
 | `ready {round}` | member to host | arena loaded |
 | `go {round}` | host to members | everyone has loaded the arena picture and sound effects (or 45 s passed): start the clock. The host starts half its worst ping later, so all start together |
 | `ls {r, m:{t:'sum', tick, h}}` | each to all (via host) | checksum of a confirmed tick of round `r` |
@@ -220,6 +237,7 @@ with "Could not reach the room host (a strict network may need a relay)."
 | `nudge {n, pick}` | member to host to others | pressed bomb on the results screen (`pick`: a sound from the list, or -1) |
 | `notice {text}` | host to members | a message for the top of the screen (someone rejoined) |
 | `victory {score}` | host to members | the match is won: show the victory screen (with the host's final scores) |
+| `roulette {spin}` | host to members | Gold Bomberman: the winner's slot, the prize and the wheel's speed |
 | `end {reason?}` | host to members | match over, back to the room; with a reason, the room has closed |
 | `leave` | member to host | leaving (also sent when the tab closes) |
 

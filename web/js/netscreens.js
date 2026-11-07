@@ -34,13 +34,21 @@
     'The room',
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     ' - Ping is the round trip from the host to each computer.',
-    ' - The host sets the number of computer players and their skill',
-    '   (Easy, Medium, Original, Hard or Dangerous), opens Match',
-    '   settings (arenas, scheme, wins, play time and the gameplay',
-    '   options) and starts the match (at least two players).',
+    ' - The host sets the number of computer players, opens Match',
+    '   settings (arenas, scheme, wins, play time, Gold Bomberman and',
+    '   the gameplay options) and starts the match (at least two',
+    '   players).',
+    ' - Skill and teams: each computer player\'s skill (Easy, Medium,',
+    '   Original, Hard or Dangerous, or all of them at once) and the',
+    '   teams: none, humans against computers, or chosen by the host',
+    '   (Enter on a player puts them on the other team). A bar under',
+    '   each head in the room shows its team: white team 1, red team 2.',
+    '   Everyone can look; only the host changes them.',
     ' - Everyone in the room sees the settings change as the host picks',
-    '   them. Team play and the Gold Bomberman roulette are off in',
-    '   network games.',
+    '   them.',
+    ' - Gold Bomberman: after the match the host spins the roulette',
+    '   for everyone, and the winner starts the next match with the',
+    '   prize.',
     '',
     '~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~',
     'During a match',
@@ -123,6 +131,7 @@
       case 'go': NM.goRound = ev.round; break;
       case 'drop': NM.applyDrop(ev); break;
       case 'victory': if (AB.match && AB.match.net) { NM.takeScore(ev.score); SC.go('victory', AB.matchWinner()); } break;
+      case 'roulette': if (AB.match && AB.match.net && NM.validSpin(ev.spin)) SC.go('roulette', { spin: ev.spin }); break;
       case 'end':
         if (ev.reason) { NM.notice = ev.reason; NP.leave(); NM.reset(); SC.go('network'); }
         else { NM.reset(); SC.go('room'); }
@@ -204,6 +213,7 @@
     const M = AB.match = first ? { net: true, wins: {}, kills: {}, round: 0, players: [], demo: false } : AB.match;
     NM.takeScore(cfg.score);        // (for a computer that rejoins, or missed the end of the last round)
     M.round = cfg.round; M.S = S; M.over = false; M.soundSeed = cfg.seed;
+    M.bonus = cfg.bonus || null;    // Gold Bomberman: {slot, pw}, with the first round (js/screens.js game)
     AB.audio.forceProfile(cfg.sim.sound || null);       // the host's sounds, the same on every computer
     M.players = cfg.players.map(p => Object.assign({}, p, { control: p.ai ? 'ai' : p.owner === me ? p.control : 'net' }));
     NM.cfg = cfg; NM.session = null; NM.nudges = {};
@@ -298,10 +308,17 @@
     if (winner) { NP.send({ t: 'victory', score: { wins: AB.match.wins, kills: AB.match.kills } }); SC.go('victory', winner); }
     else NM.hostStart(AB.match.round + 1);
   };
-  NM.hostEnd = function () {
+  // gold: the roulette's prize for the winner ({slot, pw}), kept for the next match. It goes by who
+  // the player is (their key), as the next match may put them in another slot.
+  NM.hostEnd = function (gold) {
     if (!NP.isHost()) return;
+    const p = gold && AB.match && AB.match.players.find(q => q.slot === gold.slot);
+    if (NP.room) NP.room.gold = p && p.key ? { key: p.key, pw: gold.pw } : null;
     NP.send({ t: 'end' }); NM.reset(); if (NP.room) NP.room.inGame = false; NP.setState('waiting'); SC.go('room');
   };
+  // the host's spin of the Gold Bomberman wheel: the winner's slot, the prize (an index into the
+  // wheel) and how fast it starts. Every computer's wheel then stops on the same prize.
+  NM.validSpin = (s) => !!s && Number.isInteger(s.slot) && Number.isInteger(s.r) && s.r >= 0 && s.r < 32 && typeof s.speed === 'number' && s.speed > 0.1 && s.speed < 2;
   NM.quit = function () { NP.leave(); NM.reset(); SC.go('network'); };
   // F10 (pressed twice) in a network round: this computer's players give up the round. It goes out as
   // part of their next input, so every computer drops them at the same tick
@@ -609,7 +626,7 @@
   function settingsLines(set) {
     if (!set) return [];
     const snd = set.sound ? `     Sounds: ${(A.PRESET_LABEL[set.sound.preset] || set.sound.preset).replace(/ \(.*\)/, '')}, variety ${(A.VARIETY_LABEL[set.sound.variety] || set.sound.variety).replace(/ \(.*\)/, '').toLowerCase()}` : '';
-    const L = [`Scheme: ${set.scheme}     Arenas: ${set.arenas}`,
+    const L = [`Scheme: ${set.scheme}     Arenas: ${set.arenas}` + (set.gold !== undefined ? `     Gold Bomberman: ${yn(set.gold)}` : ''),
                `Match: ${set.wins} ${set.byKills ? 'kills' : 'wins'} to win     Play time: ${U.fmtTime(set.time)}${snd}`];
     if (set.conveyor !== undefined) {
       L.push(`Random start: ${yn(set.randomStart)}   Conveyors: ${convName(set.conveyor)}   Stomped bombs detonate: ${yn(set.stomped)}`);
@@ -617,48 +634,62 @@
     }
     return L;
   }
+  // the line-up as this computer knows it: the host works it out, members have the host's (room info)
+  const rosterOf = (room) => (!room ? [] : room.host ? NP.roster(room) : (room.info && room.info.roster) || []);
+  const TEAM_COL = ['#f0f0f0', '#ff5050'];          // team 1 white, team 2 red, as in the game (js/render.js)
+  const TEAM_MODE_LABEL = { off: 'Off (everyone for themselves)', humans: 'Humans against computers', pick: 'Chosen by the host' };
+  const TEAM_MODE_SHORT = { off: 'no teams', humans: 'humans v computers', pick: 'chosen teams' };
+  const MEMBER_ROWS = ['lineup', 'names', 'voice'];
+  // a head, and while there are teams, a bar under it in its team's colour
+  function teamHead(ctx, p, x, y, teams) {
+    U.miniHead(ctx, p.color, x, y);
+    if (teams) { ctx.fillStyle = TEAM_COL[p.team ? 1 : 0]; ctx.fillRect(x - 7, y + 18, 14, 3); }
+  }
+  // the computer players' skills in a few words: "Hard", "2 Hard, 1 Dangerous" or "mixed skills"
+  function skillSummary(list) {
+    const ais = list.filter(p => p.ai);
+    if (!ais.length) return 'no computer players';
+    const n = {}; for (const p of ais) n[p.aiLevel] = (n[p.aiLevel] || 0) + 1;
+    const used = AB.AI.LEVELS.filter(l => n[l]);
+    return used.length === 1 ? AB.AI.LEVEL_NAMES[used[0]] : used.length > 2 ? 'mixed skills' : used.map(l => n[l] + ' ' + AB.AI.LEVEL_NAMES[l]).join(', ');
+  }
   SC.register('room', {
     help: 'portnet',
     enter() {
       this.err = null; this.errT = 0; SC.netVolumes(true);
       NP.leaveLobby(); NM.chatMusic('menu');
       if (NP.room && NP.room.host) { NP.room.inGame = false; NP.setState('waiting'); }
-      // the host starts on START, a member on its only choice, Voice chat
+      // the host starts on START, a member on Voice and sound
       const rows = this.rows();
-      const own = this.sel !== undefined && rows[this.sel] && (NP.room && NP.room.host ? true : ['names', 'voice'].includes(rows[this.sel].k));
+      const own = this.sel !== undefined && rows[this.sel] && (NP.room && NP.room.host ? true : MEMBER_ROWS.includes(rows[this.sel].k));
       if (!own) this.sel = rows.findIndex(r => r.k === (NP.room && NP.room.host ? 'start' : 'voice'));
     },
     musicKey() { NM.toggleChatMusic('menu'); },
-    // members see the host's lines greyed out, and can only open their voice settings
-    rows() { return NP.room && NP.room.host ? [{ k: 'ais' }, { k: 'skill' }, { k: 'setup' }, { k: 'names' }, { k: 'voice' }, { k: 'start' }] : [{ k: 'ais' }, { k: 'skill' }, { k: 'setup' }, { k: 'names' }, { k: 'voice' }]; },
+    // members see the host's lines greyed out; they can look at the line-up and open their own settings
+    rows() {
+      const r = [{ k: 'ais' }, { k: 'lineup' }, { k: 'setup' }, { k: 'names' }, { k: 'voice' }];
+      if (NP.room && NP.room.host) r.push({ k: 'start' });
+      return r;
+    },
     key(k) {
       const room = NP.room; if (!room) { SC.go('network'); return; }
       if (U.isBack(k) && k.pad === undefined) { NP.leave(); SC.go('network'); return; }
       const rows = this.rows(), row = rows[this.sel];
       if (row && row.k === 'voice' && U.isOK(k)) { A.play(10); SC.go('netvoice'); return; }
       if (row && row.k === 'names' && U.isOK(k)) { A.play(10); SC.go('netlocal', { room: true }); return; }
+      if (row && (row.k === 'lineup' || (row.k === 'ais' && room.host)) && U.isOK(k)) { A.play(10); SC.go('netplayers'); return; }
       if (!room.host) {
-        // a member chooses between its own two rows: names and voice
-        const mine = rows.map((r, i) => (r.k === 'names' || r.k === 'voice' ? i : -1)).filter(i => i >= 0);
-        if (k.code === 'ArrowUp' || k.code === 'ArrowDown') { this.sel = mine[(mine.indexOf(this.sel) + 1) % mine.length]; A.play(20); }
+        const mine = rows.map((r, i) => (MEMBER_ROWS.includes(r.k) ? i : -1)).filter(i => i >= 0);
+        if (k.code === 'ArrowUp' || k.code === 'ArrowDown') { const d = k.code === 'ArrowUp' ? -1 : 1; this.sel = mine[(mine.indexOf(this.sel) + d + mine.length) % mine.length]; A.play(20); }
         return;
       }
-      const humans = room.members.reduce((a, m) => a + m.players.length, 0);
       if (k.code === 'ArrowUp') { this.sel = (this.sel + rows.length - 1) % rows.length; A.play(20); }
       else if (k.code === 'ArrowDown') { this.sel = (this.sel + 1) % rows.length; A.play(21); }
-      else if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight') && row.k === 'ais') {
-        const was = room.ais;
-        room.ais = AB.clamp(room.ais + (k.code === 'ArrowLeft' ? -1 : 1), 0, NP.MAX_PLAYERS - humans);
-        if (room.ais !== was) room.aiOrder = NP.shuffledAIOrder();       // new colours for the computer players
-        AB.settings.netAIs = room.ais; AB.saveSettings(); A.play(20); NP.refreshRoom();
-      } else if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight' || U.isOK(k)) && row.k === 'skill') {
-        const L = AB.AI.LEVELS, d = k.code === 'ArrowLeft' ? -1 : 1;
-        room.aiLevel = L[(L.indexOf(room.aiLevel) + d + L.length) % L.length];
-        AB.settings.netAILevel = room.aiLevel; AB.saveSettings(); A.play(20); NP.refreshRoom();
-      } else if (U.isOK(k)) {
+      else if ((k.code === 'ArrowLeft' || k.code === 'ArrowRight') && row.k === 'ais') { NP.setAIs(room.ais + (k.code === 'ArrowLeft' ? -1 : 1)); A.play(20); }
+      else if (U.isOK(k)) {
         if (row.k === 'setup') { A.play(10); SC.go('netsetup'); return; }
-        if (row.k === 'ais') { this.sel = rows.findIndex(r => r.k === 'start'); return; }
-        if (humans + room.ais < 2) { this.err = 'Need at least two players: wait for someone to join, or add computer players.'; this.errT = 240; A.play(40); return; }
+        const why = NP.lineupProblem(room);
+        if (why) { this.err = why; this.errT = 240; A.play(40); return; }
         A.play(10); NM.hostStart(1);
       }
     },
@@ -672,9 +703,8 @@
       G.text(ctx, room.host ? 'You are the host: set up the match, then start it.' : room.state === 'playing' ? 'A match is on: you play again from its next round.' : 'Waiting for the host to start the match...', 320, 56, room.host || room.state === 'playing' ? CYAN : GREY, 'font0', 1);
       // computers and their players
       G.text(ctx, 'Computer', 56, 78, GREY, 'font0'); G.text(ctx, 'Players', 260, 78, GREY, 'font0'); G.text(ctx, 'Ping', 584, 78, GREY, 'font0', 2);
-      // everyone's colour as the host has sorted them out (first come, first served)
-      const cols = room.host ? NP.assignColours(room.members, room.ais) : null;
-      const aiCols = room.host ? cols.slice(cols.length - room.ais) : (room.info && room.info.aiColours) || [];
+      // everyone's colour as the host has sorted them out (first come, first served), and their team
+      const list = rosterOf(room), teams = room.teams !== 'off';
       let slot = 0;
       room.members.forEach((m, i) => {
         const y = 92 + i * 25, mine = m.id === room.me;
@@ -682,7 +712,7 @@
         G.text(ctx, fit(m.name, 150) + (i === 0 ? '  (host)' : ''), 56, y, mine ? YELLOW : WHITE, 'font1');
         const vs = voiceIcon(m, mine);
         if (vs) AB.voice.drawIcon(ctx, 246, y + 9, vs, U.frame());
-        m.players.forEach((p, j) => { U.miniHead(ctx, cols ? cols[slot] : (p.color | 0), 268 + j * 22, y + 2); slot++; });
+        m.players.forEach((p, j) => { teamHead(ctx, list[slot] || { color: p.color | 0, team: 0 }, 268 + j * 22, y + 2, teams); slot++; });
         G.text(ctx, fit(m.players.map(p => (typeof p === 'string' ? p : p.name)).join(', '), 250 - m.players.length * 22, 'font0'), 268 + m.players.length * 22 + 6, y + 2, GREY, 'font0');
         if (i === 0) G.text(ctx, 'host', 584, y + 2, GREY, 'font0', 2);
         else G.text(ctx, Math.round(m.ping || 0) + ' ms', 584, y + 2, pingCol(m.ping || 0), 'font0', 2);
@@ -694,14 +724,14 @@
       rows.forEach((row, i) => {
         const y = ys + i * 22, sel = i === this.sel;
         if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.14)'; ctx.fillRect(44, y - 3, 552, 21); U.menuCursor(ctx, 50, y + 15); }
-        const col = row.k === 'voice' || row.k === 'names' ? (sel ? YELLOW : WHITE) : !room.host ? GREY : sel ? YELLOW : WHITE;
+        const col = !room.host && !MEMBER_ROWS.includes(row.k) ? GREY : sel ? YELLOW : WHITE;
         if (row.k === 'ais') {
           G.text(ctx, `Computer players: ${room.ais}`, 70, y, col, 'font1');
-          for (let k = 0; k < room.ais; k++) U.miniHead(ctx, aiCols[k] !== undefined ? aiCols[k] : slot + k, 290 + k * 20, y + 2);
+          list.filter(p => p.ai).forEach((p, k) => teamHead(ctx, p, 290 + k * 20, y + 2, teams));
           if (sel) G.text(ctx, 'Left/Right', 590, y + 2, GREY, 'font0', 2);
-        } else if (row.k === 'skill') {
-          G.text(ctx, `Computer skill: ${AB.AI.LEVEL_NAMES[room.aiLevel || 'hard']}`, 70, y, col, 'font1');
-          if (sel) G.text(ctx, 'Left/Right', 590, y + 2, GREY, 'font0', 2);
+        } else if (row.k === 'lineup') {
+          G.text(ctx, 'Skill and teams  >', 70, y, col, 'font1');
+          G.text(ctx, fit(`${skillSummary(list)}  -  ${TEAM_MODE_SHORT[room.teams] || ''}`, 280, 'font0'), 312, y + 2, CYAN, 'font0');
         } else if (row.k === 'setup') {
           G.text(ctx, room.host ? 'Match settings  >' : 'Match settings:', 70, y, col, 'font1');
           if (sel) G.text(ctx, 'Enter: change', 590, y + 2, GREY, 'font0', 2);
@@ -746,6 +776,81 @@
     const mic = V.mic === 'live' ? (V.muted ? 'muted' : V.cfg().gate ? 'on (voice gate)' : 'on') : MIC_TEXT[V.mic] || V.mic;
     return `On  -  ${mic}  -  hearing ${others} other${others === 1 ? '' : 's'}`;
   }
+
+  // ================================================================= SKILL AND TEAMS
+  // the next match's line-up: how many computer players, each one's skill, and the teams. The host
+  // changes it; members see it (and which team they are on).
+  SC.register('netplayers', {
+    help: 'portnet',
+    enter() { this.sel = 0; this.err = null; this.errT = 0; },
+    rows() {
+      const r = [{ k: 'count' }, { k: 'all' }, { k: 'teams' }];
+      for (const p of rosterOf(NP.room)) r.push({ k: 'p', p });
+      r.push({ k: 'back' });
+      return r;
+    },
+    key(k) {
+      const room = NP.room; if (!room) { SC.go('network'); return; }
+      const rows = this.rows();
+      this.sel = Math.min(this.sel, rows.length - 1);
+      const row = rows[this.sel], lr = k.code === 'ArrowLeft' ? -1 : k.code === 'ArrowRight' ? 1 : 0, flip = U.isOK(k) || k.code === 'Tab';
+      if (k.code === 'ArrowUp') { this.sel = (this.sel + rows.length - 1) % rows.length; A.play(20); return; }
+      if (k.code === 'ArrowDown') { this.sel = (this.sel + 1) % rows.length; A.play(21); return; }
+      if (U.isBack(k) || (U.isOK(k) && row.k === 'back')) { A.play(10); SC.go('room'); return; }
+      if (!lr && !flip) return;
+      if (!room.host) { this.err = 'Only the host changes these.'; this.errT = 120; A.play(40); return; }
+      const d = lr || 1;
+      if (row.k === 'count') NP.setAIs(room.ais + d);
+      else if (row.k === 'all') NP.stepAILevel(d);
+      else if (row.k === 'teams') NP.stepTeams(d);
+      else if (row.k === 'p') {
+        // a computer player: Left/Right its skill, Enter its team; a human: either changes the team
+        if (row.p.ai && lr) NP.stepAILevel(d, +row.p.key.slice(3));
+        else if (room.teams === 'off') { this.err = 'Turn teams on first (Teams, above).'; this.errT = 150; A.play(40); return; }
+        else NP.toggleTeam(row.p.key);
+      }
+      A.play(20);
+    },
+    tick() { if (this.errT > 0) this.errT--; if (!NP.room) SC.go('network'); },
+    render(ctx) {
+      const room = NP.room;
+      U.glueDim(ctx, 5);
+      U.panel(ctx, 30, 22, 580, 420, 0.86);
+      if (!room) return;
+      U.centerText(ctx, 'SKILL AND TEAMS', 34, YELLOW);
+      G.text(ctx, room.host ? 'Everyone in the room sees the changes straight away.' : 'The host sets these up for the next match.', 320, 56, GREY, 'font0', 1);
+      const rows = this.rows(), teams = room.teams !== 'off', LN = AB.AI.LEVEL_NAMES;
+      const levels = [...new Set(rows.filter(r => r.k === 'p' && r.p.ai).map(r => r.p.aiLevel))];
+      let y = 76;
+      rows.forEach((row, i) => {
+        const sel = i === this.sel, col = sel ? YELLOW : !room.host && row.k !== 'back' ? GREY : WHITE;
+        if ((row.k === 'p' && rows[i - 1].k !== 'p') || row.k === 'back') y += 8;      // (a gap around the players)
+        if (sel) { ctx.fillStyle = 'rgba(248,216,72,0.14)'; ctx.fillRect(44, y - 3, 552, 21); U.menuCursor(ctx, 50, y + 15); }
+        const value = (t) => G.text(ctx, t, 330, y, sel ? YELLOW : CYAN, 'font1');
+        if (row.k === 'count') { G.text(ctx, 'Computer players', 70, y, col, 'font1'); value(String(room.ais)); }
+        else if (row.k === 'all') { G.text(ctx, 'Skill of all of them', 70, y, col, 'font1'); value(levels.length > 1 ? 'Mixed' : LN[levels[0] || room.aiLevel]); }
+        else if (row.k === 'teams') { G.text(ctx, 'Teams', 70, y, col, 'font1'); value(TEAM_MODE_LABEL[room.teams] || room.teams); }
+        else if (row.k === 'p') {
+          const p = row.p;
+          teamHead(ctx, p, 84, y, teams);
+          G.text(ctx, fit(p.name, 210), 104, y, col, 'font1');
+          if (p.ai) value(LN[p.aiLevel] || p.aiLevel);
+          else { const m = (room.members || []).find(q => q.id === p.owner); G.text(ctx, fit('on ' + (m ? m.name : 'a computer'), 150, 'font0'), 330, y + 3, GREY, 'font0'); }
+          if (teams) G.text(ctx, p.team ? 'Team 2' : 'Team 1', 584, y, TEAM_COL[p.team ? 1 : 0], 'font1', 2);
+        } else G.text(ctx, 'Back to the room', 70, y, col, 'font1');
+        y += 21;
+      });
+      const row = rows[Math.min(this.sel, rows.length - 1)] || {};
+      const tip = row.k === 'count' ? 'Up to ten players in all, people and computer players together.'
+        : row.k === 'all' ? 'Sets every computer player, and players whose computer leaves the match (if they carry on).'
+          : row.k === 'teams' ? { off: 'Everyone plays for themselves.', humans: 'Everyone on a keyboard or joystick against the computer players.', pick: 'Pick the teams below: Enter puts a player on the other team.' }[room.teams]
+            : row.k === 'p' && row.p.ai ? (teams ? 'Left/Right: its skill   Enter: the other team' : 'Left/Right: its skill')
+              : row.k === 'p' ? (teams ? 'Enter or Left/Right: the other team' : 'With teams on, Enter puts a player on the other team.') : '';
+      G.text(ctx, fit(tip || '', 560, 'font0'), 320, 398, GREY, 'font0', 1);
+      G.text(ctx, 'Up/Down: choose   Left/Right: change   Enter: team   Esc: back to the room', 320, 420, GREY, 'font0', 1);
+      if (this.errT > 0) { U.panel(ctx, 100, 200, 440, 50, 0.92); U.centerText(ctx, this.err, 216, ORANGE, 'font0'); }
+    },
+  });
 
   // ================================================================= VOICE CHAT SETTINGS
   // each player's own: on/off, the microphone, the voice gate and how loud everyone else is
@@ -872,7 +977,7 @@
       const tog = (k) => () => { S[k] = !S[k]; };
       return [
         { label: 'Arenas', value: SC.uiLate().arenaSummary(S) + '  >', action: () => SC.go('arenas', { back: 'netsetup' }) },
-        { label: 'Schemes', value: AB.schemeSummary(S) + '  >', action: () => { const r = NP.room; SC.go('schemes', { back: 'netsetup', players: r ? r.members.reduce((a, m) => a + m.players.length, 0) + r.ais : 2, team: false }); } },
+        { label: 'Schemes', value: AB.schemeSummary(S) + '  >', action: () => { const r = NP.room; SC.go('schemes', { back: 'netsetup', players: r ? r.members.reduce((a, m) => a + m.players.length, 0) + r.ais : 2, team: !!r && r.teams !== 'off' }); } },
         { label: 'Match', value: AB.msg(211, '%u %s to win match').replace('%u', S.winsNeeded).replace('%s', S.winByKills ? AB.msg(209, 'Kills') : AB.msg(208, 'Wins')),
           change: (d) => { S.winsNeeded = AB.clamp(S.winsNeeded + d, 1, S.winByKills ? 50 : 9); } },
         { label: lbl(255, 'Win Matches By Kill Total'), value: yn(S.winByKills), change: () => { S.winByKills = !S.winByKills; S.winsNeeded = AB.clamp(S.winsNeeded, 1, S.winByKills ? 50 : 9); } },
@@ -883,6 +988,7 @@
         { label: lbl(257, 'Enclosement Depth'), value: AB.msg(315 + S.enclosement), change: (d) => { S.enclosement = (S.enclosement + d + 4) % 4; } },
         { label: lbl(261, 'Diseases Can Be Destroyed'), value: yn(S.diseasesDestroyable), change: tog('diseasesDestroyable') },
         { label: lbl(262, 'Lost net players revert to AIs'), value: yn(S.lostNetToAI), change: tog('lostNetToAI') },
+        { label: lbl(256, 'Gold Bomberman'), value: yn(S.goldBomberman), change: tog('goldBomberman') },
         // sounds: the host's choice for everyone, and every computer picks the same takes
         { label: 'Sounds (everyone)', value: A.PRESET_LABEL[NP.soundProfile().preset], change: (d) => { const P = A.PRESETS; S.netVoices = P[(P.indexOf(NP.soundProfile().preset) + d + P.length) % P.length]; } },
         { label: 'Sound variety (everyone)', value: A.VARIETY_LABEL[NP.soundProfile().variety], change: (d) => { const P = A.VARIETY; S.netVariety = P[(P.indexOf(NP.soundProfile().variety) + d + P.length) % P.length]; } },
@@ -916,7 +1022,7 @@
         G.text(ctx, it.label, 66, y, sel ? YELLOW : WHITE, 'font1');
         if (it.value) G.text(ctx, fit(it.value, 236), 352, y, sel ? YELLOW : CYAN, 'font1');
       }, 600);
-      G.text(ctx, 'Team play and the Gold Bomberman roulette are off in network games.', 320, 400, GREY, 'font0', 1);
+      G.text(ctx, 'Teams and the skill of each computer player: Skill and teams, in the room.', 320, 400, GREY, 'font0', 1);
       G.text(ctx, 'Up/Down: choose   Left/Right: change   Enter: open   Esc: back to the room', 320, 420, GREY, 'font0', 1);
     },
   });

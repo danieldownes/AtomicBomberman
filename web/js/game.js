@@ -1047,7 +1047,9 @@
       if (!this.S.aiFinale) return;
       if (this.finaleT === undefined) {
         if (!this.players.some(p => !p.isAI) || this.players.some(p => p.alive && !p.isAI)) return;
-        if (this.players.filter(p => p.alive).length < 2) return;
+        // (and they still have someone to fight: with teams, the round is over once only one team is left)
+        const alive = this.players.filter(p => p.alive);
+        if (alive.length < 2 || (this.S.teamPlay && alive.every(p => p.team === alive[0].team))) return;
         // walls already closing in: no warning needed, they speed up at once
         if (this.enc && !this.enc.done) { this.finaleT = 0; this.enc.depth = 99; this.enc.fast = true; this.hurryShown = 2 * AB.TPS; return; }
         this.finaleT = 3 * AB.TPS;

@@ -211,13 +211,14 @@ To test network play:
   the scenarios: 300 and 600 ms pings with jitter, 5% loss and lag spikes; a computer leaving (its
   player an AI, or out), timed out after its input stops reaching the host, or in a background tab;
   forfeits; five computers and ten players; every AI; other schemes and arenas; drifting clocks; a
-  member that hears nothing for 5 seconds as the round ends. `--only drop,far --runs 10` picks some.
+  member that hears nothing for 5 seconds as the round ends; team play (humans against computers,
+  and mixed teams) with a Gold Bomberman prize. `--only drop,far --runs 10` picks some.
   * Every tick a computer has confirmed, its whole saved state (`saveState()`, the AIs' memory
     included) has to equal a clean replay of the final inputs. When one doesn't, it says where they
     first differ (`state.finaleT: undefined vs 175`).
   * It also fails a round if a computer reports a desync, or if the round ended on one computer but
     another never got to see the end confirmed.
-  * All 12 scenarios, 4 rounds each, take about a minute on 12 workers.
+  * All 14 scenarios, 4 rounds each, take about a minute on 12 workers.
 
 To redo the decompilation (needs `angr`, `r2pipe` and radare2):
 

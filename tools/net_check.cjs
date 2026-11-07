@@ -80,7 +80,8 @@ function firstDiff(a, b, p = 'state') {
 //    dropLevel, lostNetToAI, forfeit {c, at}, rate [frames per frame], late [frames to start],
 //    uplink {c, at, notice} (from `at` none of c's game packets reach the host; dropped `notice` later),
 //    blackout {c, len} (c's links carry nothing for len frames, from when the host first sees the round
-//    over), endWait (frames on the game screen after the confirmed end)
+//    over), endWait (frames on the game screen after the confirmed end), teams [team of each player]
+//    (team play), bonus {slot, pw} (a Gold Bomberman prize)
 function run(o) {
   const nc = o.humans.length;
   const ctxs = Array.from({ length: nc + 1 }, loadGame);    // one per computer, and one for the replay
@@ -91,9 +92,10 @@ function run(o) {
     for (let k = 0; k < o.humans[c]; k++) { slotsOf[c].push(players.length); players.push({ slot: players.length, color: players.length, ai: false, name: `C${c}P${k}` }); }
   }
   for (const lv of o.ais) players.push({ slot: players.length, color: players.length, ai: true, aiLevel: lv, name: 'AI ' + lv });
+  for (const p of players) { p.team = o.teams ? o.teams[p.slot] : 0; p.bonus = o.bonus && o.bonus.slot === p.slot ? o.bonus.pw : -1; }
   // (as js/netplay.js makeRound and js/screens.js build a network round)
   const mkGame = (AB) => {
-    const S = Object.assign(AB.defaultSettings(), { playTime: 150, enclosement: 1, lostNetToAI: o.lostNetToAI !== false, aiFinale: true, countdown: true });
+    const S = Object.assign(AB.defaultSettings(), { playTime: 150, enclosement: 1, lostNetToAI: o.lostNetToAI !== false, aiFinale: true, countdown: true, teamPlay: !!o.teams });
     return new AB.Game({ settings: S, scheme: D.schemes[o.scheme || 'basic'], level: o.level || 0, seed: o.seed, players: players.map(p => Object.assign({}, p)), match: {} });
   };
   // (as js/netscreens.js makeSession)
@@ -235,6 +237,9 @@ const SCENARIOS = {
   schemes:  ['other schemes and arenas (conveyors, warps, trampolines, glove)', (r) => ({ scheme: SCHEMES[r % SCHEMES.length], level: (r * 5 + 2) % 13 })],
   clocks:   ['clocks that run fast or slow, and a late start', (r) => ({ rate: [1, 1.012, 0.988], late: [0, 4 + r, 9 + r] })],
   end:      ['a member hears nothing for 5 s as the round ends', (r) => ({ blackout: { c: 1 + (r % 2), len: 300 }, frames: 6000 })],
+  teams:    ['humans against computers, and a Gold Bomberman prize', (r) => ({ teams: [0, 0, 0, 1, 1, 1, 1, 1], bonus: { slot: r % 3, pw: [3, 5, 8, 9, 10, 2, 11, 12][r % 8] } })],
+  teamsMix: ['two teams of people and computer players; one computer leaves', (r) => ({ humans: [2, 2, 1], ais: ['hard', 'dangerous', 'original'], teams: [0, 0, 1, 1, 0, 1, 0, 1],
+              drop: { c: 2, at: 500 + r * 97, notice: 40 }, bonus: { slot: 5 + (r % 3), pw: [12, 7, 6, 1][r % 4] } })],
 };
 function job(name, r) {
   return Object.assign({ seed: 1000 + r * 31 + name.length, level: r % 13, mesh: r % 2 === 1 }, BASE, SCENARIOS[name][1](r));

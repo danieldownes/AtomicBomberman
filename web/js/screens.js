@@ -46,7 +46,9 @@
   // ---------------------------------------------------------------- manager
   SC.register = (name, s) => { screens[name] = s; };
   SC.go = function (name, arg) {
-    if (cur && cur.leave) cur.leave();
+    // (from under the help overlay: a network round starting, say. The screen the help is over goes too.)
+    if (saved) { const s = saved.scr; saved = null; if (s && s.leave) s.leave(); }
+    else if (cur && cur.leave) cur.leave();
     cur = screens[name]; curName = name; frame = 0;
     if (cur.enter) cur.enter(arg);
   };
@@ -1151,12 +1153,17 @@
     key(k) {
       if (this.t < 40) return;
       if (AB.match && AB.match.net) {
-        if (AB.netplay.isHost() && (isBomb(k) || isBack(k))) AB.netmatch.hostEnd();
-        else if (isBack(k) && k.pad === undefined) AB.netmatch.quit();
+        if (AB.netplay.isHost() && (isBomb(k) || isBack(k))) {
+          if (!MS().goldBomberman) { AB.netmatch.hostEnd(); return; }
+          // the host spins the wheel for everyone (js/netscreens.js validSpin)
+          const spin = { slot: this.w.p.slot, r: Math.floor(Math.random() * ROUL.length), speed: 0.55 + Math.random() * 0.2 };
+          AB.netplay.send({ t: 'roulette', spin });
+          SC.go('roulette', { spin });
+        } else if (isBack(k) && k.pad === undefined) AB.netmatch.quit();
         return;
       }
       if (isBomb(k) || isBack(k)) {
-        if (MS().goldBomberman && !AB.match.demo) SC.go('roulette', this.w);
+        if (MS().goldBomberman && !AB.match.demo) SC.go('roulette', { w: this.w });
         else { AB.match = null; SC.go('players'); }
       }
     },
@@ -1177,14 +1184,34 @@
     ['powpunch', AB.PW.PUNCH], ['powgrab', AB.PW.GRAB], ['powspoog', AB.PW.SPOOGE], ['powgold', AB.PW.GOLDFLAME], ['powtrig', AB.PW.TRIGGER],
     ['powjelly', AB.PW.JELLY], ['powbad', AB.PW.BADDISEASE], ['powrand', AB.PW.RANDOM], ['powslow', AB.PW.CLOG],
   ];
+  // where the wheel starts so that, slowing as it does each tick, it stops on prize r
+  function rouletteStart(r, speed) {
+    let d = 0;
+    for (let s = speed; ;) { d += s; s *= 0.985; if (s < 0.01) break; }
+    return (((r + 0.5 - d) % ROUL.length) + ROUL.length) % ROUL.length;
+  }
   SC.register('roulette', {
     help: 'roulette',
-    enter(w) {
-      this.w = w; this.pos = Math.random() * ROUL.length; this.speed = 0.55 + Math.random() * 0.2; this.done = false; this.t = 0; this.lastI = -1;
-      A.music('menu');
+    // a: { w } (the match winner), or in a network match { spin }: the host's {slot, r, speed}, so every
+    // computer's wheel turns the same way and stops on the same prize
+    enter(a) {
+      const spin = this.spin = a.spin || null;
+      this.slot = spin ? spin.slot : a.w.p.slot;
+      this.speed = spin ? spin.speed : 0.55 + Math.random() * 0.2;
+      this.pos = spin ? rouletteStart(spin.r, this.speed) : Math.random() * ROUL.length;
+      this.done = false; this.t = 0; this.lastI = -1; this.note = null;
+      chatMusic('menu');
     },
+    // (network: tell the room who has the prize, once back there)
+    leave() { if (this.note && AB.netplay.room) AB.netplay.room.say(this.note); this.note = null; },
     key(k) {
-      if (this.done && (isOK(k) || isBack(k))) { AB.nextBonus = { slot: this.w.p.slot, pw: ROUL[this.result][1] }; AB.match = null; SC.go('players'); }
+      if (this.spin) {
+        // only the host goes on, back to the room; the prize goes with the winner to the next match
+        if (AB.netplay.isHost()) { if (this.done && (isBomb(k) || isBack(k))) AB.netmatch.hostEnd({ slot: this.slot, pw: ROUL[this.result][1] }); }
+        else if (isBack(k) && k.pad === undefined) AB.netmatch.quit();
+        return;
+      }
+      if (this.done && (isOK(k) || isBack(k))) { AB.nextBonus = { slot: this.slot, pw: ROUL[this.result][1] }; AB.match = null; SC.go('players'); }
     },
     tick() {
       this.t++;
@@ -1193,8 +1220,10 @@
         const i = Math.floor(this.pos) % ROUL.length;
         if (i !== this.lastI) { A.play(1300); this.lastI = i; }
         if (this.speed < 0.01) {
-          this.done = true; this.result = i;
-          if (ROUL[i][1] === AB.PW.CLOG || ROUL[i][1] === AB.PW.DISEASE || ROUL[i][1] === AB.PW.BADDISEASE) A.play(1320); else A.play(1310);
+          this.done = true; this.result = this.spin ? this.spin.r % ROUL.length : i;
+          const pw = ROUL[this.result][1];
+          if (this.spin) this.note = `${pLabel(this.slot)} starts the next match with ${pw === AB.PW.RANDOM ? 'a random power-up' : AB.msg(800 + pw, 'a prize').trim()}.`;
+          if (pw === AB.PW.CLOG || pw === AB.PW.DISEASE || pw === AB.PW.BADDISEASE) A.play(1320); else A.play(1310);
         }
       }
     },
@@ -1214,6 +1243,7 @@
         panel(ctx, 120, 400, 400, 60, 0.85);
         centerText(ctx, AB.msg(790, 'The Gold Player has'), 408, WHITE, 'font0');
         centerText(ctx, AB.msg(800 + ROUL[this.result][1], '') + ' ' + AB.msg(791, 'for the next match!!'), 430, YELLOW, 'font1');
+        if (this.spin) centerText(ctx, AB.netplay.isHost() ? 'Press bomb to go back to the room' : 'Waiting for the host...   (Esc: leave the network game)', 464, GREY, 'font0');
       }
     },
   });
