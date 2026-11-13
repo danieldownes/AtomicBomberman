@@ -54,6 +54,8 @@
 
   const idx = (x, y) => y * COLS + x;
   const DIR_BIT = [AB.IN.UP, AB.IN.RIGHT, AB.IN.DOWN, AB.IN.LEFT];   // directions 0..3 as input bits
+  // MurmurHash3's finaliser (Game.dice)
+  const hash32 = (x) => { x = Math.imul(x ^ (x >>> 16), 0x85ebca6b); x = Math.imul(x ^ (x >>> 13), 0xc2b2ae35); return (x ^ (x >>> 16)) >>> 0; };
 
   const STATE_SKIP = new Set(['cfg', 'S', 'scheme', 'rng', 'events', 'camp']);
 
@@ -194,6 +196,7 @@
       const p = {
         slot: pc.slot, color: pc.color, team: pc.team | 0, ai: !!pc.ai, name: pc.name || ('Player ' + (pc.slot + 1)),
         alive: true, dead: false, dieAnim: 0, dieT: 0, dieY: 0,
+        spillAt: -1, spill: null,           // dead: the death animation's dieT when their powerups flew out, and [cell, powerup]s
         x: AB.cellCenterX(cx), y: AB.cellCenterY(cy), acc: 0,
         dir: 2, moving: false, walkPix: 0,
         pw: new Array(15).fill(0), collected: [],
@@ -334,6 +337,10 @@
         if (p.dieAnim) {
           p.dieT++;
           if (p.dieAnim === 9) p.dieY -= K.ANGEL_DY / TPR;   // the angel death floats upward (#106)
+          // the death animation is over (or the angel has left the top of the screen): what they had
+          // collected flies out across the arena, a few seconds after the death (fcn.0041f29b calls
+          // fcn.0041dbfe at the animation's end)
+          if (p.spillAt < 0 && (p.dieT >= this.dieLen(p) || p.y + p.dieY < -20)) this.spillPowerups(p);
         }
         return;
       }
@@ -622,7 +629,7 @@
         if (p.pw[k] <= 0) return;
         p.pw[k] = 0;
         for (let ci = p.collected.indexOf(k); ci >= 0; ci = p.collected.indexOf(k)) p.collected.splice(ci, 1);
-        if (!silent) this.scatter([k], AB.cellX(p.x), AB.cellY(p.y));
+        if (!silent) this.scatter([k], AB.cellX(p.x), AB.cellY(p.y), 3000 + p.slot * 16 + k);
       };
       if (t === PW.TRIGGER) { spit(PW.JELLY); spit(PW.PUNCH); }
       if (t === PW.JELLY) spit(PW.TRIGGER);
@@ -669,19 +676,39 @@
         }
       }
     }
-    // drop powerups randomly across the map (on death, on bomb-on-head, when spat out)
-    scatter(list, nearX, nearY) {
-      for (const t of list) {
-        if (t === PW.DISEASE || t === PW.BADDISEASE) { if (!this.rng.chance(2)) continue; }
-        for (let k = 0; k < 60; k++) {
-          const x = this.rng.int(COLS), y = this.rng.int(ROWS), i = idx(x, y);
+    // drop powerups randomly across the map (at the end of a death, on bomb-on-head, when spat out, a
+    // disease that won't burn). `who` names the thrower for dice(). Returns where they landed: [cell, powerup]s.
+    scatter(list, nearX, nearY, who) {
+      const placed = [];
+      list.forEach((t, k) => {
+        const d = this.dice(who, k);
+        if ((t === PW.DISEASE || t === PW.BADDISEASE) && !d.chance(2)) return;
+        for (let n = 0; n < 60; n++) {
+          const x = d.int(COLS), y = d.int(ROWS), i = idx(x, y);
           if (this.tiles[i] === T_BLANK && this.items[i] < 0 && this.bombAt[i] < 0 && this.flameT[i] <= 0 && !this.extras[i] && !this.playerAtCell(x, y)) {
             this.items[i] = t; this.itemSafe[i] = R(4);
             this.ev({ t: 'itemfly', x, y, fromX: nearX, fromY: nearY, pw: t });
+            placed.push([i, t]);
             break;
           }
         }
-      }
+      });
+      return placed;
+    }
+    // Dice of their own for the k-th powerup `who` throws out this tick. They depend only on the round's
+    // seed, the tick and who throws, never on how often the game's own dice (this.rng) have been rolled.
+    // In network play each computer rolls the game's dice for its guesses too (computer players think
+    // about where everyone is), so a powerup thrown with them would land somewhere else after every
+    // correction: it showed for a few frames, then vanished from there.
+    dice(who, k) { return new AB.Rng(hash32(hash32(hash32((this.cfg.seed >>> 0) + this.tick) + who) + k)); }
+    // how long a death animation plays, in ticks (Classic draws its own, 11 states of 3 frames each: js/render.js)
+    dieLen(p) { return (this.level === AB.CLASSIC_LEVEL ? 33 : AB.DIE_LEN[p.dieAnim - 1] || 40) * TPR; }
+    // the end of a death: everything the player collected flies out (the original puts back what they
+    // have above the scheme's starting amounts, fcn.0041dbfe)
+    spillPowerups(p) {
+      const list = p.collected.slice(); p.collected.length = 0;
+      p.spillAt = p.dieT;
+      p.spill = this.scatter(list, AB.cellX(p.x), AB.cellY(p.y), 1000 + p.slot);
     }
 
     // ------------------------------------------------------------------ bombs
@@ -863,7 +890,7 @@
         if (t !== PW.DISEASE && t !== PW.BADDISEASE && p.pw[t] > START[t]) p.pw[t]--;
         lost.push(t);
       }
-      this.scatter(lost, AB.cellX(p.x), AB.cellY(p.y));
+      this.scatter(lost, AB.cellX(p.x), AB.cellY(p.y), 2000 + p.slot);
     }
 
     explode(b) {
@@ -908,7 +935,7 @@
       if (t < 0 || this.itemSafe[i] > 0) return;
       this.items[i] = -1;
       this.ev({ t: 'burnitem', x, y, pw: t });
-      if ((t === PW.DISEASE || t === PW.BADDISEASE) && !this.S.diseasesDestroyable) this.scatter([t], x, y);
+      if ((t === PW.DISEASE || t === PW.BADDISEASE) && !this.S.diseasesDestroyable) this.scatter([t], x, y, 4000 + i);
     }
     setFlame(x, y, kind, owner, color, gold) {
       const i = idx(x, y);
@@ -961,9 +988,7 @@
           if (k !== p && this.rng.chance(K.TAUNT)) this.ev({ t: 'taunt', slot: k.slot, of: p.slot });
         }
       }
-      // all collected powerups fly out across the map
-      const list = p.collected.slice(); p.collected.length = 0;
-      this.scatter(list, AB.cellX(p.x), AB.cellY(p.y));
+      // (what they collected flies out across the map when the death animation is over: updatePlayer)
     }
 
     // ------------------------------------------------------------------ campaign enemies (aliens.c)

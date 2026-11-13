@@ -111,6 +111,9 @@ There is nothing to install or host.
   the others' keys until they arrive and corrects itself (rollback), so play stays smooth even at
   a 300-500 ms ping. F9 shows the network figures. If someone leaves, their players carry on as
   computer players.
+* When a player dies, the powerups they collected fly out across the arena once their death
+  animation is over, a few seconds later, as in the original. They land in the same places on
+  every computer.
 * On the results screen only the host goes on. Pressing bomb there tells everyone you're waiting;
   after a few presses you can pick one of 15 sounds to send them.
 * F10 twice gives up the round for the players on your computer. Once only computer players are
@@ -402,8 +405,8 @@ intro/              the CD's intro movie, re-encoded (WebM, with MP4 as a fallba
 * **Logic:** `BM95.EXE` (Watcom C) was decompiled with angr and radare2. The port follows it for
   per-pixel movement with corner sliding, multi-key direction preference, kick/punch/throw,
   oldest-first trigger detonation, trampoline relocation, disease spreading, the spiral HURRY
-  enclosement (one block every 250 ms) and more. All numbers come from the game's own
-  `VALUELST.RES`.
+  enclosement (one block every 250 ms), a dead player's powerups flying out once the death
+  animation is over, and more. All numbers come from the game's own `VALUELST.RES`.
 
 * **Voices:** the CD holds 2,027 `.RSS` clips, but the game only uses the 974 named in
   SOUNDLST.RES; it never had voice modes. The unused clips were transcribed with Whisper. Each

@@ -217,4 +217,7 @@ window.AB = window.AB || {};
   AB.IDLE_ANIMS = [{ ani: 'zen', seq: 'Unnamed', len: 121 }, { ani: 'headwipe', seq: 'Unnamed', len: 211 },
                    { ani: 'applbite', seq: 'Unnamed', len: 121 }, { ani: 'nuckblow', seq: 'unnamed', len: 121 }];
   AB.IDLE_AFTER = 5;
+  // states (at 20 fps) of each death animation, 'die green 1' to 'die green 24' in XPLODE1-17.ANI: the
+  // game times by them when a dead player's powerups fly out (js/game.js spillPowerups)
+  AB.DIE_LEN = [83, 62, 63, 93, 17, 79, 14, 12, 28, 77, 36, 63, 75, 36, 35, 69, 63, 85, 48, 20, 59, 54, 41, 75];
 })(window.AB);

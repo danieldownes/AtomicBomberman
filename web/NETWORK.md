@@ -272,6 +272,12 @@ late. Now it uses **rollback**, the way fighting games do it:
     plays twice. A real event the guess missed plays late.
   * A death waits until it is *confirmed* (the inputs up to that tick are final), so nobody is seen
     dying and then coming back. The player stands still meanwhile, a few frames at most.
+  * The powerups a dead player had fly out when the death animation is over (as in the original),
+    and on each computer when it's over there: the animation started late there, so they wait too.
+    Where each one lands comes from dice of its own (`game.dice`: the round's seed, the tick, who
+    threw it), not from `game.rng`. A computer rolls `game.rng` for its guesses as well (computer
+    players think about where everyone is), so with it a correction used to move the powerups
+    elsewhere: they showed for a few frames, then vanished from there.
   * A player moved by a correction slides to the right place over a few frames instead of jumping.
   * The round ends (and scores count) only once the end itself is confirmed.
 * **Time sync.** Every packet carries the sender's tick. Each computer measures "their tick when
@@ -396,3 +402,6 @@ profiles (or one normal and one private window) at
   reading it, and caches go in `_`-prefixed fields (`g._dangerousKey`), which a restore drops.
   `node tools/net_check.cjs` finds anything that breaks this.
 * Cosmetic choices, such as which taunt or explosion sample plays, can stay local and random.
+* A random outcome that shows across the arena and should stay put through corrections, such as
+  where thrown-out powerups land, can come from `game.dice(who, k)` instead of `game.rng`: the same
+  on every computer, and the same before and after a correction.

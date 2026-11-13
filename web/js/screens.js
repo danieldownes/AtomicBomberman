@@ -931,18 +931,21 @@
       }
     },
     // network round: draw the game as this computer knows it for sure. A death the others' inputs could
-    // still undo shows the player standing until it's certain; then the death animation starts. Players
+    // still undo shows the player standing until it's certain; then the death animation starts, as
+    // late as it started here, and the powerups the player had fly out when it's over here too. Players
     // moved by a correction slide to where they belong instead of jumping (js/net.js smooth).
     drawNet(ctx) {
       const g = this.g, s = this.session, conf = s.confirmedTick, undo = [];
+      const hideSpill = (p) => { for (const [i, t] of p.spill || []) if (g.items[i] === t) { undo.push([g.items, i, t]); g.items[i] = -1; } };
       g.players.forEach((p, i) => {
-        if (!p.alive && p.deathTick > conf) { undo.push([p, 'alive', p.alive]); p.alive = true; return; }
+        if (!p.alive && p.deathTick > conf) { hideSpill(p); undo.push([p, 'alive', p.alive]); p.alive = true; return; }
         if (!p.alive) {
           const k = p.slot, d = this.deathShown[k];
           if (!d || d.tick !== p.deathTick) this.deathShown[k] = { tick: p.deathTick, at: g.tick };
           const late = this.deathShown[k].at - p.deathTick;
           if (late > 0) {
             const dieT = Math.max(0, p.dieT - late);
+            if (dieT < p.spillAt) hideSpill(p);
             undo.push([p, 'dieT', p.dieT], [p, 'dieY', p.dieY]);
             if (p.dieT > 0) p.dieY = p.dieY * dieT / p.dieT;
             p.dieT = dieT;
