@@ -217,7 +217,10 @@
     const dn = AB.DIRNAME[p.dir];
     let color = p.color;
     if (p.alive && p.disT > 0 && (t >> 2) % 2) color = (t * 7 + p.slot * 3) % 10;      // diseased players flash
-    if (g.S.teamPlay && g.tick > AB.val(32, 40) * AB.TPR) color = p.team ? 2 : 0;   // team colours after a while (TEAM0.PCX white, TEAM1.PCX red)
+    // team colours after a while (TEAM0.PCX white, TEAM1.PCX red), all but the head, which still shows
+    // who it is (js/gfx.js); all over in a death, and on the classic sprites, which only have their
+    // heads coloured
+    if (g.S.teamPlay && g.tick > AB.val(32, 40) * AB.TPR) { const team = p.team ? 2 : 0; color = p.alive && !classic ? [color, team] : team; }
     if (classic) { if (p.alive && p.dis[AB.DIS.INVISIBLE] && (t % 90) > 6) return; drawClassicPlayer(ctx, g, p, t, color, dn); return; }
     if (!p.alive) {
       const name = 'die green ' + p.dieAnim;

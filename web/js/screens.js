@@ -779,8 +779,12 @@
       // the round's music starts when the countdown ends (straight away without one)
       this.track = AB.gameTrack(S, level); this.musicOn = false; this.lastCount = undefined; this.goTick = undefined;
       A.stopMusic();
-      // warm up recoloured sprites for the players in this round
-      for (const p of M.players) G.prewarm(['walk', 'stand', 'bombs', 'mflame', 'kick'], p.color);
+      // warm up recoloured sprites for the players in this round (with teams, heads in their own
+      // colours on bodies in the team's: js/render.js)
+      for (const p of M.players) {
+        G.prewarm(['walk', 'stand', 'bombs', 'mflame', 'kick'], p.color);
+        if (S.teamPlay) G.prewarm(['walk', 'stand', 'kick'], [p.color, p.team ? 2 : 0]);
+      }
       // decode the timing-critical effects up front; voice clips decode on first use
       A.predecode(100, 299); A.predecode(300, 363); A.predecode(1300, 1330); A.predecode(2700, 2799);
     },

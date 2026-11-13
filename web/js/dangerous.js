@@ -26,7 +26,10 @@
 //     behind a bomb to kick it, the more as the bricks run out;
 //   - late in the round keeps out of the closing walls' way, and gets between the enemies still out
 //     there and the middle;
-//   - fires its remote bombs when someone stands in the blast, getting out of it first if need be.
+//   - fires its remote bombs when someone stands in the blast, getting out of it first if need be;
+//   - in teams, spares its teammates: it won't lay, kick or punch a bomb that leaves one no way out, nor
+//     fire a remote bomb on one, and a bomb that makes one run counts against it as much as making an
+//     enemy run counts for it.
 'use strict';
 (function (AB) {
   const { COLS, ROWS, DX, DY, IN, PW, DIS, K } = AB;
@@ -461,6 +464,7 @@
 
   // ---------------------------------------------------------------- players
   function enemy(g, p, o) { return o !== p && o.alive && (!g.S.teamPlay || o.team !== p.team); }
+  function mate(g, p, o) { return o !== p && o.alive && g.S.teamPlay && o.team === p.team; }
   // ticks before someone can start walking: stunned, or picking up a bomb
   const waitOf = (o) => (o.special === 3 ? o.stunT : o.special === 4 ? Math.max(0, K.PICKUP_PAUSE + 30 - o.specialT) : 0);
   const fuseOf = (o) => (o.dis[DIS.SHORTFUZE] ? Math.floor(K.FUSE / 3) : K.FUSE);
@@ -594,7 +598,8 @@
   // catches an enemy (a remote blast gives no warning) or has caught nobody for P.fireAfter ticks, and
   // leaves it safe: out of the blast (chain reactions too), or with a way out still. If it would catch an
   // enemy but it stands in the blast itself: st.shot, get clear first (shotS: the board as it would burn
-  // once fired; pickGoal() and refuge() rate the cells out of it).
+  // once fired; pickGoal() and refuge() rate the cells out of it). Not while that would bring the flames
+  // to a teammate any sooner.
   const shotS = new Int32Array(N);
   function fire(g, p, st, cx, cy, here, speed, lead, ox, oy) {
     let ob = null;
@@ -604,7 +609,11 @@
     danger(g, p, S2, E2);
     fireNow = null;
     let hits = 0;
-    for (const o of g.players) if (enemy(g, p, o) && S2[idx(AB.cellX(o.x), AB.cellY(o.y))] <= 2) hits++;
+    for (const o of g.players) {
+      const c = idx(AB.cellX(o.x), AB.cellY(o.y));
+      if (enemy(g, p, o) && S2[c] <= 2) hits++;
+      else if (mate(g, p, o) && S2[c] < S0[c]) return false;
+    }
     if (!hits && g.tick - ob.dropTick <= P.fireAfter) return false;
     if (S2[here] >= NEVER) return true;
     if (S2[here] > 2 && safeCells(S2, risk, queB, search(g, cx, cy, speed, lead, S2, E2, distB, prevB, queB, timeB, -1, walk, ox, oy), 1)) return true;
@@ -714,24 +723,27 @@
   // left only those, they're squeezed. `wall`: the bomb's cell if it blocks the way; `stunned` (stunT
   // ticks): an enemy the bomb bounces off, who can't move for that long. One who could kick or punch the
   // bomb away (and would think to) isn't cornered by it; one who won't see it coming till later (lagOf)
-  // starts to run only then. With P.dodge, they can wait a blast out (escape()).
+  // starts to run only then. With P.dodge, they can wait a blast out (escape()). A teammate it would
+  // squeeze, harass or cut off counts as much against it; one it would leave no way out rules it out
+  // (-NEVER), with no counting on them to kick or punch the bomb away.
   function pressure(g, p, wall, stunned, stunT) {
     const keep = P.lateAt ? wallRings(g) : 0;
     let worth = 0;
     for (const o of g.players) {
-      if (!enemy(g, p, o) || o.tramp) continue;
+      const foe = enemy(g, p, o), sign = foe ? 1 : -1;
+      if ((!foe && !mate(g, p, o)) || o.tramp) continue;
       const ex = AB.cellX(o.x), ey = AB.cellY(o.y), oc = idx(ex, ey);
       if (S2[oc] >= NEVER) continue;
-      if (P.dodge && wall >= 0 && !blind(o) && canSend(g, o, wall)) { if (S0[oc] >= NEVER) worth += P.harass; continue; }
+      if (foe && P.dodge && wall >= 0 && !blind(o) && canSend(g, o, wall)) { if (S0[oc] >= NEVER) worth += P.harass; continue; }
       const ov = g.speedOf(o), ow = waitOf(o), oX = AB.offX(o.x), oY = AB.offY(o.y);
       const all = room(g, ex, ey, ov, Math.max(ow, o === stunned ? stunT : 0, lagOf[o.slot]), S2, E2, wall, oX, oY, keep);
       const k = inside;
       let allBefore = ROOM, before = ROOM;
       if (S0[oc] < NEVER || keep) { allBefore = room(g, ex, ey, ov, ow, S0, E0, -1, oX, oY, keep); before = inside; }
-      if (all === 0 && allBefore > 0) { worth += P.kill; continue; }
-      if (k < before) worth += P.cut * (before - k);
-      if (k <= 2 && k < before) worth += Math.floor(P.squeeze / Math.max(1, k));
-      else if (S0[oc] >= NEVER) worth += P.harass;
+      if (all === 0 && allBefore > 0) { if (!foe) return -NEVER; worth += P.kill; continue; }
+      if (k < before) worth += sign * P.cut * (before - k);
+      if (k <= 2 && k < before) worth += sign * Math.floor(P.squeeze / Math.max(1, k));
+      else if (S0[oc] >= NEVER) worth += sign * P.harass;
     }
     return worth;
   }
@@ -871,14 +883,14 @@
     slideT = t;
     return idx(x, y);
   }
-  // When each enemy (lagOf, by slot) would start getting out of the way of a bomb (of `range`) kicked
-  // along path[] w ticks from now: those who see a bomb's blast only from where it is (the game's other
-  // computer players, with P.blind) not till that reaches them, or it goes off; the others at once.
+  // When each enemy or teammate (lagOf, by slot) would start getting out of the way of a bomb (of `range`)
+  // kicked along path[] w ticks from now: those who see a bomb's blast only from where it is (the game's
+  // other computer players, with P.blind) not till that reaches them, or it goes off; the others at once.
   const lagOf = new Int32Array(16);
   const blind = (o) => P.blind && o.isAI && o.aiLevel !== 'dangerous';
   function lags(g, p, range, w) {
     for (const o of g.players) {
-      if (!enemy(g, p, o) || !blind(o)) continue;
+      if (!(enemy(g, p, o) || mate(g, p, o)) || !blind(o)) continue;
       const ox = AB.cellX(o.x), oy = AB.cellY(o.y);
       let t = w + slideT;
       for (let k = 0; k < pathN; k++) if (inCross(g, path[k], range, ox, oy)) { t = k ? w + pathT[k] : 0; break; }
@@ -918,7 +930,7 @@
       moved = null; nExtra = 0;
       const m = search(g, cx, cy, speed, lead, S2, E2, distB, prevB, queB, timeB, -1, walk, AB.offX(p.x), AB.offY(p.y));
       if ((S2[here] < NEVER || risk[here]) && !safeCells(S2, risk, queB, m, 1)) continue;
-      for (const o of g.players) if (enemy(g, p, o) && blind(o)) lagOf[o.slot] = inCross(g, idx(bx, by), b.range, AB.cellX(o.x), AB.cellY(o.y)) ? 0 : throwT;
+      for (const o of g.players) if ((enemy(g, p, o) || mate(g, p, o)) && blind(o)) lagOf[o.slot] = inCross(g, idx(bx, by), b.range, AB.cellX(o.x), AB.cellY(o.y)) ? 0 : throwT;
       const v = pressure(g, p, c, bonked, bonkT + K.STUN);
       lagOf.fill(0);
       if (v > bv) { bv = v; best = d; }
@@ -948,9 +960,9 @@
   }
 
   // Where it could corner someone: of the cells a few steps away in line with an enemy, in reach of its
-  // blast, the one where a bomb (laid when it gets there) would leave that enemy fewest ways out, while it
-  // could still get away itself. Looked at every few ticks (it costs a search or three); the enemy may have
-  // moved by the time it's there, so it counts half.
+  // blast (and no teammate), the one where a bomb (laid when it gets there) would leave that enemy fewest
+  // ways out, while it could still get away itself. Looked at every few ticks (it costs a search or
+  // three); the enemy may have moved by the time it's there, so it counts half.
   function findTrap(g, p, n, st, speed) {
     st.trap = -1; st.trapV = 0;
     if (!canBomb(g, p, -1, -1)) return;
@@ -961,13 +973,15 @@
       if (distA[c] > 6) continue;               // (que is in order of steps, but for warps)
       if (S0[c] < NEVER || risk[c] || keepOff[c]) continue;
       const x = c % COLS, y = (c - x) / COLS;
-      let foe = null;
+      let foe = null, mates = false;
       for (const o of g.players) {
-        if (!enemy(g, p, o)) continue;
+        const isFoe = enemy(g, p, o);
+        if (!isFoe && !mate(g, p, o)) continue;
         const ex = AB.cellX(o.x), ey = AB.cellY(o.y);
-        if ((ex === x || ey === y) && Math.abs(ex - x) + Math.abs(ey - y) <= range && clearLine(g, x, y, ex, ey)) { foe = o; break; }
+        if (!((ex === x || ey === y) && Math.abs(ex - x) + Math.abs(ey - y) <= range && clearLine(g, x, y, ex, ey))) continue;
+        if (!isFoe) mates = true; else if (!foe) foe = o;
       }
-      if (!foe) continue;
+      if (!foe || mates) continue;
       tried++;
       xCell[0] = c; xRange[0] = range; xFuse[0] = timeA[c] + fuse; nExtra = 1;
       danger(g, p, S2, E2);
@@ -987,9 +1001,9 @@
     return true;
   }
 
-  // what bombing from cell c would do, roughly (bricks it breaks, enemies in its blast), if it could get
-  // out of the blast's way to a safe cell (or a warp hole) within `depth` steps; 0 if not. Fills arm[]
-  // with the blast.
+  // what bombing from cell c would do, roughly (bricks it breaks, enemies in its blast, less teammates),
+  // if it could get out of the blast's way to a safe cell (or a warp hole) within `depth` steps; 0 if
+  // not. Fills arm[] with the blast.
   function spotWorth(g, p, c, range, depth, keen, greed) {
     const x = c % COLS, y = (c - x) / COLS;
     let bricks = 0;
@@ -1005,8 +1019,11 @@
       }
       arm[d] = l;
     }
-    let caught = 0;
-    for (const o of g.players) if (enemy(g, p, o) && inBlast(c, AB.cellX(o.x), AB.cellY(o.y))) caught++;
+    let caught = 0, mates = 0;
+    for (const o of g.players) {
+      if (!inBlast(c, AB.cellX(o.x), AB.cellY(o.y))) continue;
+      if (enemy(g, p, o)) caught++; else if (mate(g, p, o)) mates++;
+    }
     if (!bricks && !caught) return 0;
     // a way out of the blast: breadth-first from c (where the bomb would be) to a cell outside it
     if (++stampC >= 0x7fffffff) { stampC = 1; seenC.fill(0); }
@@ -1025,7 +1042,7 @@
         if (!risk[c2] && !inBlast(c, x2, y2)) { out = true; break; }
       }
     }
-    return out ? Math.floor(bricks * P.spot * greed / 100) + caught * P.hunt * keen : 0;
+    return out ? Math.max(0, Math.floor(bricks * P.spot * greed / 100) + (caught - mates) * P.hunt * keen) : 0;
   }
   // is (x2, y2) in the blast spotWorth() last measured from cell c?
   function inBlast(c, x2, y2) {

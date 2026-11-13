@@ -131,7 +131,9 @@ Local Play > Player Setup: Right cycles a player through *AI easy*, *AI medium*,
 Typing on Player Setup gives the highlighted player its own name in place of "Player 3" (up to 12
 characters); Backspace deletes, and an empty name is "Player 3" again. The name shows on the name
 tags at the round start, the results and the victory screen. Tab switches a player's team (T now
-types).
+types). In team games each bomberman's suit turns its team's colour (white or red) two seconds into
+the round, as in the original, but the head keeps the player's own colour, so you can still tell who
+is who.
 
 * **Original** (js/original.js): the 1997 game's own AI, ported from its executable (BM95.EXE). The
   comments name the original function behind each part, so it reads side by side with
@@ -146,12 +148,15 @@ types).
     7. now and then go after a player, people before computers;
     8. otherwise wander.
   * It drops bombs without checking it can get away from them.
+  * In teams it neither bombs a teammate next to it nor goes after one, as in the original, but it
+    doesn't otherwise look out for them.
   * Reversed Controls don't affect it, as in the original.
   * Its quirks are kept. For example, after half a second of going for power-ups in a round it stops
     going for them, because the original resets the wrong timer.
 * **Hard:** the port's own AI, called Original until the 1997 one was ported. It works out when each
   cell will burn and walks round it, bombs bricks and anyone in its blast, and goes for power-ups
-  nearby.
+  nearby. In teams it won't lay a bomb with a teammate in its blast, or one that would cut a
+  teammate off from every safe cell, and it won't fire a remote bomb with a teammate in it.
 * **Medium:** Hard, but it thinks it over less often, notices other players' bombs later, chases less
   and grabs fewer power-ups.
 * **Easy:** all of that, more so.
@@ -190,6 +195,9 @@ types).
   * It fires its remote bombs when someone stands in the blast, stepping out of the way first if it's in
     it too (chain reactions included), and punches bombs at people. A punched bomb that lands on a head
     stuns them, usually for long enough.
+  * In teams it spares its teammates. It won't lay, kick or punch a bomb that would leave one no way
+    out, nor fire a remote bomb that would reach one. A bomb that makes a teammate run, or takes away
+    some of their room, counts against it as much as the same against an enemy counts for it.
   * How much each of these counts was trained by play against Hards and Originals
     (`tools/ai_tune.cjs`), all but how long it waits penned in.
 `node tools/ai_arena.cjs` plays computer-only rounds headless to compare them (see ../tools/README.md).
@@ -204,6 +212,9 @@ Measured with it on the 11 default arenas, counting the rounds someone won:
   someone won (an even share is 25%).
 * **Dangerous one on one against Hard:** 90% of 1,000 rounds (92%).
 * **One Dangerous against three Originals:** 81% of 1,000 rounds (87%).
+* **Teams of three, Dangerous against Hard:** the Dangerous team won 579 of 600 rounds. A Dangerous
+  killed a teammate 19 times and a Hard 57 times (132 and 96 times before they spared their
+  teammates). Most of the Hards' were bombs that were then kicked or punched, or that Poops laid.
 
 Per player per tick, Original thinks for about 1 µs, Hard for 9 and Dangerous for about 40.
 
@@ -385,7 +396,8 @@ intro/              the CD's intro movie, re-encoded (WebM, with MP4 as a fallba
   extracted (see `../extracted`).
 * **Sprites:** the `CHFILEANI` format was decoded. FRAM/CIMG chunks hold 16-bit RLE images with a key
   colour; SEQ/STAT chunks hold sequences with per-state frame offsets. The green player suit is
-  recoloured at runtime for the ten player colours (VALUELST 200-247, the `.RMP` remap idea).
+  recoloured at runtime for the ten player colours (VALUELST 200-247, the `.RMP` remap idea). For
+  team games js/gfx.js also finds the head in every frame, so it can take a colour of its own.
 * **Audio:** `.RSS` files are raw 22 kHz 16-bit stereo PCM, re-encoded to MP3.
 * **Logic:** `BM95.EXE` (Watcom C) was decompiled with angr and radare2. The port follows it for
   per-pixel movement with corner sliding, multi-key direction preference, kick/punch/throw,

@@ -100,6 +100,15 @@
   }
 
   function enemyOf(g, p, o) { return o !== p && o.alive && (!g.S.teamPlay || o.team !== p.team); }
+  function mateOf(g, p, o) { return o !== p && o.alive && g.S.teamPlay && o.team === p.team; }
+  // with the bombs on T (and one about to be laid at cell `bomb`), can o stay put, or get to a safe
+  // cell in good time (as the AI's own escape check)?
+  function canEscape(g, o, T, bomb) {
+    const ox = AB.cellX(o.x), oy = AB.cellY(o.y);
+    if (T[idx(ox, oy)] === Infinity) return true;
+    const tpc = Math.ceil(AB.CW * AB.SUB / g.speedOf(o)), esc = bfs(g, ox, oy, tpc, T, new Set([bomb]));
+    return esc.order.some(c => T[c] === Infinity && esc.dist[c] * tpc < AB.K.FUSE - 30);
+  }
 
   // ---- skill levels ----
   // 'hard' is the AI above, unchanged: the port's own, written for it (it was called Original until the
@@ -208,7 +217,7 @@
       }
     } else {
       // trigger bombs go off oldest first (fcn.00424b41): fire the oldest one once we are clear of
-      // it and it would catch an enemy, or it has been sitting there a while
+      // it and it would catch an enemy, or it has been sitting there a while; never with a teammate in it
       {
         let oldest = null;
         for (const b of g.bombs) if (b && !b.dead && b.owner === p.slot && b.kind === 1 && b.motion < 2 && (!oldest || b.dropTick < oldest.dropTick)) oldest = b;
@@ -216,7 +225,8 @@
           const cells = blastCells(g, oldest);
           const clear = !cells.includes(here);
           const hits = g.players.some(o => enemyOf(g, p, o) && cells.includes(idx(AB.cellX(o.x), AB.cellY(o.y))));
-          if (clear && (hits || g.tick - oldest.dropTick > 75) && !(p.prevIn & AB.IN.ACTION)) return AB.IN.ACTION;
+          const mates = g.players.some(o => mateOf(g, p, o) && cells.includes(idx(AB.cellX(o.x), AB.cellY(o.y))));
+          if (clear && !mates && (hits || g.tick - oldest.dropTick > 75) && !(p.prevIn & AB.IN.ACTION)) return AB.IN.ACTION;
         }
       }
       // powerups within reach (#920)
@@ -248,10 +258,14 @@
           if (g.tiles[c] === 2 && g.brickT[c] <= 0) value += 1;
         }
         // bricks adjacent along the arms are reported by blastCells including the brick cell
-        let hitsEnemy = false;
-        for (const o of g.players) if (enemyOf(g, p, o) && set.has(idx(AB.cellX(o.x), AB.cellY(o.y)))) hitsEnemy = true;
+        let hitsEnemy = false, hitsMate = false;
+        for (const o of g.players) {
+          if (!set.has(idx(AB.cellX(o.x), AB.cellY(o.y)))) continue;
+          if (enemyOf(g, p, o)) hitsEnemy = true; else if (mateOf(g, p, o)) hitsMate = true;
+        }
         if (hitsEnemy) value += 3;
-        if (value > 0 && (hitsEnemy || g.rng.chance(Math.max(1, AB.val(915, 5) - 3)))) {
+        // (not with a teammate in the blast)
+        if (value > 0 && !hitsMate && (hitsEnemy || g.rng.chance(Math.max(1, AB.val(915, 5) - 3)))) {
           // escape check with the new bomb in place
           const T2 = Float32Array.from(T);
           for (const c of cells) if (AB.K.FUSE < T2[c]) T2[c] = AB.K.FUSE;
@@ -260,7 +274,8 @@
           let safeSpots = 0;
           for (const c of esc.order) if (T2[c] === Infinity && esc.dist[c] * tpc < AB.K.FUSE - 30) safeSpots++;
           const crowd = g.players.some(o => o !== p && o.alive && Math.abs(AB.cellX(o.x) - cx) + Math.abs(AB.cellY(o.y) - cy) <= 3);
-          const ok = safeSpots >= (crowd ? 2 : 1);
+          // (and so has every teammate)
+          const ok = safeSpots >= (crowd ? 2 : 1) && g.players.every(o => !mateOf(g, p, o) || canEscape(g, o, T2, here));
           if (ok) { st.lastBomb = g.tick; st.moveTo = -1; return AB.IN.BOMB; }
         }
       }

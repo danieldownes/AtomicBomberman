@@ -36,21 +36,22 @@
 
   // Green -> player colour remap. The sprites are authored with a pure green suit; the original
   // remaps it per player (0.RMP..9.RMP, RGB from VALUELST 200-247). We keep the grey/white part of
-  // each pixel and scale only the green chroma by the target colour.
-  function remapCanvas(img, rgb) {
+  // each pixel and scale only the green chroma by the target colour. head (team play): the pixels
+  // head.at(pixel index) picks out take head.rgb instead.
+  function remapCanvas(img, rgb, head) {
     const c = document.createElement('canvas');
     c.width = img.width; c.height = img.height;
     const x = c.getContext('2d');
     x.drawImage(img, 0, 0);
     const d = x.getImageData(0, 0, c.width, c.height);
     const p = d.data;
-    const R = rgb[0] / 100, G = rgb[1] / 100, B = rgb[2] / 100;
+    const body = rgb.map(v => v / 100), top = head && head.rgb.map(v => v / 100);
     for (let i = 0; i < p.length; i += 4) {
       if (!p[i + 3]) continue;
       const r = p[i], g = p[i + 1], b = p[i + 2];
       if (g > r && g > b) {
-        const m = r > b ? r : b, k = g - m;
-        p[i] = Math.min(255, m + k * R); p[i + 1] = Math.min(255, m + k * G); p[i + 2] = Math.min(255, m + k * B);
+        const m = r > b ? r : b, k = g - m, t = top && head.at(i >> 2) ? top : body;
+        p[i] = Math.min(255, m + k * t[0]); p[i + 1] = Math.min(255, m + k * t[1]); p[i + 2] = Math.min(255, m + k * t[2]);
       }
     }
     x.putImageData(d, 0, 0);
@@ -58,25 +59,126 @@
   }
   // a few non-player tints used by the port
   const SPECIAL = { gold: [100, 80, 0], ghost: [60, 60, 70] };
+
+  // ---- team play: the head in the player's colour, the rest in the team's ----
+  // A colour can be a pair [head, body] of player colours. Which pixels of a bomberman are its head is
+  // worked out from the original pixels a frame at a time, as each is first wanted (all of them when f
+  // isn't given): per atlas pixel, 1 head, 2 the rest.
+  const pairOf = (color) => Array.isArray(color) && AB.PLAYER_RGB[color[0]] && AB.PLAYER_RGB[color[1]] ? color : null;
+  const heads = {};
+  function headsOf(ani, f) {
+    const a = atlases[ani], W = a.img.width, frames = a.meta.frames;
+    const h = heads[ani] || (heads[ani] = { m: new Uint8Array(W * a.img.height), done: new Uint8Array(frames.length), c: null });
+    for (let k = f === undefined ? 0 : f; k < (f === undefined ? frames.length : f + 1); k++) {
+      if (h.done[k]) continue;
+      const [fx, fy, w, ht] = frames[k];
+      if (!h.c) h.c = document.createElement('canvas');
+      h.c.width = w; h.c.height = ht;
+      const x = h.c.getContext('2d'); x.drawImage(a.img, fx, fy, w, ht, 0, 0, w, ht);
+      const s = headOf(x.getImageData(0, 0, w, ht).data, w, ht);
+      for (let y = 0; y < ht; y++) for (let i = 0; i < w; i++) if (s[y * w + i]) h.m[(fy + y) * W + fx + i] = s[y * w + i];
+      h.done[k] = 1;
+    }
+    return h.m;
+  }
+  // One frame (its pixels d, w by h): 1 head, 2 the rest, 0 neither. The helmet is the topmost big green
+  // part, and the head the largest disc the figure holds within the helmet's rows and columns, with
+  // everything below the helmet cut off (seen from behind, the head runs into the shoulders). Green in
+  // the disc is head, but for a part of its own (a glove) that is mostly outside it; the ball on the
+  // antenna is a small part above the disc. Pixels near the green (edges smoothed or redrawn in HD) go
+  // with the nearest of it.
+  function headOf(d, w, h) {
+    const N = w * h, st = [];
+    // the background: see-through pixels joined to the frame's edge (not a stray one inside the figure)
+    const bg = new Uint8Array(N);
+    const fill = (x, y) => { const i = y * w + x; if (!bg[i] && !d[i * 4 + 3]) { bg[i] = 1; st.push(i); } };
+    for (let x = 0; x < w; x++) { fill(x, 0); fill(x, h - 1); }
+    for (let y = 0; y < h; y++) { fill(0, y); fill(w - 1, y); }
+    while (st.length) { const i = st.pop(), x = i % w, y = (i - x) / w; if (x > 0) fill(x - 1, y); if (x < w - 1) fill(x + 1, y); if (y > 0) fill(x, y - 1); if (y < h - 1) fill(x, y + 1); }
+    // the clearly green parts, 8-connected
+    const green = new Uint8Array(N), part = new Int32Array(N).fill(-1), parts = [];
+    for (let i = 0; i < N; i++) { const o = i * 4; green[i] = d[o + 3] && d[o + 1] - Math.max(d[o], d[o + 2]) >= 24 ? 1 : 0; }
+    for (let i = 0; i < N; i++) {
+      if (!green[i] || part[i] >= 0) continue;
+      const p = { px: [], x0: w, x1: -1, y0: h, y1: -1, sx: 0, sy: 0 };
+      part[i] = parts.length; st.push(i);
+      while (st.length) {
+        const j = st.pop(), x = j % w, y = (j - x) / w;
+        p.px.push(j); p.sx += x; p.sy += y;
+        p.x0 = Math.min(p.x0, x); p.x1 = Math.max(p.x1, x); p.y0 = Math.min(p.y0, y); p.y1 = Math.max(p.y1, y);
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx, ny = y + dy, q = ny * w + nx;
+          if (nx >= 0 && ny >= 0 && nx < w && ny < h && green[q] && part[q] < 0) { part[q] = parts.length; st.push(q); }
+        }
+      }
+      parts.push(p);
+    }
+    const most = Math.max(0, ...parts.map(p => p.px.length));
+    let helm = null;
+    for (const p of parts) if (p.px.length >= Math.max(80, 0.4 * most) && (!helm || p.y0 < helm.y0 || (p.y0 === helm.y0 && p.px.length > helm.px.length))) helm = p;
+    let cx = 0, cy = 0, R = 0;
+    if (helm) {
+      // distances to the background (or the frame's edge), with all below the helmet as background
+      const D = new Float32Array(N), at = (x, y) => x < 0 || y < 0 || x >= w || y >= h ? 0 : D[y * w + x];
+      for (let i = 0; i < N; i++) D[i] = bg[i] || i >= (helm.y1 + 1) * w ? 0 : 1e6;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y * w + x; if (D[i]) D[i] = Math.min(D[i], at(x - 1, y) + 1, at(x, y - 1) + 1, at(x - 1, y - 1) + 1.414, at(x + 1, y - 1) + 1.414); }
+      for (let y = h - 1; y >= 0; y--) for (let x = w - 1; x >= 0; x--) { const i = y * w + x; if (D[i]) D[i] = Math.min(D[i], at(x + 1, y) + 1, at(x, y + 1) + 1, at(x + 1, y + 1) + 1.414, at(x - 1, y + 1) + 1.414); }
+      // the disc's centre: within the helmet's span both across and down (inside the ring a helmet
+      // seen from the front makes round the face)
+      const rx0 = new Int16Array(h).fill(w), rx1 = new Int16Array(h).fill(-1), cy0 = new Int16Array(w).fill(h), cy1 = new Int16Array(w).fill(-1);
+      for (const j of helm.px) { const x = j % w, y = (j - x) / w; rx0[y] = Math.min(rx0[y], x); rx1[y] = Math.max(rx1[y], x); cy0[x] = Math.min(cy0[x], y); cy1[x] = Math.max(cy1[x], y); }
+      let best = 0;
+      for (let y = helm.y0; y <= helm.y1; y++) for (let x = rx0[y]; x <= rx1[y]; x++) if (y >= cy0[x] && y <= cy1[x] && D[y * w + x] > best) { best = D[y * w + x]; cx = x; cy = y; }
+      R = best + 1.5;
+    }
+    const inDisc = (j) => { const x = j % w, y = (j - x) / w; return (x - cx) * (x - cx) + (y - cy) * (y - cy) <= R * R; };
+    // each part: 1 head, 2 the rest, 0 the helmet (pixel by pixel, in the disc or not)
+    const side = parts.map(p => {
+      if (!helm) return 2;
+      if (p === helm) return 0;
+      const n = p.px.length, inside = p.px.filter(inDisc).length, x = p.sx / n, y = p.sy / n;
+      if (inside >= n / 2) return 1;
+      return !inside && n <= 0.18 * Math.PI * R * R && y < cy - 0.4 * R && Math.hypot(x - cx, y - cy) < 1.9 * R ? 1 : 2;
+    });
+    const s = new Uint8Array(N), out = new Uint8Array(N);
+    for (let i = 0; i < N; i++) if (part[i] >= 0) s[i] = side[part[i]] || (inDisc(i) ? 1 : 2);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      let v = s[y * w + x];
+      for (let r = 1; r <= 2 && !v; r++) for (let dy = -r; dy <= r && !v; dy++) for (let dx = -r; dx <= r && !v; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if (nx >= 0 && ny >= 0 && nx < w && ny < h && part[ny * w + nx] >= 0) v = s[ny * w + nx];
+      }
+      out[y * w + x] = v;
+    }
+    return out;
+  }
   const hdTints = new Map(); let hdTintBytes = 0;
   gfx.releaseHDTints = function () { hdTints.clear(); hdTintBytes = 0; };
   // HD atlases whose pixels can't be read (opened from disk without js/gfx.js readableSrc's scripts):
   // those animations are drawn from the original, recoloured sprites instead
   const hdUnreadable = new Set();
   // the HD cel recoloured for `color`; null: no recolouring needed; false: can't recolour it here
-  function hdFrame(ani, f, color, hd) {
-    const a = atlases[ani], rgb = typeof color === 'string' ? SPECIAL[color] : AB.PLAYER_RGB[color];
+  const hdFrame = (ani, f, color, hd) => celFrame(ani, f, color, hd, AB.hd.scale(), 'hd');
+  // frame f of ani cut from img (its atlas at scale s) and recoloured, cached cel by cel (`tag` tells
+  // the atlases apart): the HD ones, and the original sprites in team colours
+  function celFrame(ani, f, color, img, s, tag) {
+    const a = atlases[ani], pair = pairOf(color), rgb = typeof color === 'string' ? SPECIAL[color] : AB.PLAYER_RGB[pair ? pair[1] : color];
     if (!a.meta.recolor || color === undefined || color === null || !rgb) return null;
-    if (hdUnreadable.has(hd)) return false;
-    const key = ani + ':' + f + ':' + color;
+    if (hdUnreadable.has(img)) return false;
+    const key = ani + ':' + f + ':' + color + ':' + tag;
     if (hdTints.has(key)) { const v = hdTints.get(key); hdTints.delete(key); hdTints.set(key, v); return v.canvas; }
-    const fr = a.meta.frames[f], s = AB.hd.scale(), c = document.createElement('canvas');
+    const fr = a.meta.frames[f], c = document.createElement('canvas');
     c.width = fr[2] * s; c.height = fr[3] * s;
-    c.getContext('2d').drawImage(hd, fr[0] * s, fr[1] * s, c.width, c.height, 0, 0, c.width, c.height);
+    c.getContext('2d').drawImage(img, fr[0] * s, fr[1] * s, c.width, c.height, 0, 0, c.width, c.height);
     // Cache only the cel being used. Tinting a complete HD death/idle atlas per player is costly.
     let canvas;
-    try { canvas = remapCanvas(c, rgb); }
-    catch (e) { hdUnreadable.add(hd); console.warn('HD ' + ani + ': can\'t recolour (' + e.name + '), using the original sprites'); return false; }
+    try {
+      // a pair: each pixel goes by the original pixel it was drawn from
+      const m = pair && headsOf(ani, f), W = a.img.width, cw = c.width;
+      const head = pair && { rgb: AB.PLAYER_RGB[pair[0]], at: (j) => { const X = j % cw, Y = (j - X) / cw; return m[(fr[1] + ((Y / s) | 0)) * W + fr[0] + ((X / s) | 0)] === 1; } };
+      canvas = remapCanvas(c, rgb, head);
+    }
+    catch (e) { hdUnreadable.add(img); console.warn('HD ' + ani + ': can\'t recolour (' + e.name + '), using the original sprites'); return false; }
     const bytes = c.width * c.height * 4;
     hdTints.set(key, { canvas, bytes }); hdTintBytes += bytes;
     while (hdTintBytes > 64 * 1024 * 1024 && hdTints.size > 1) {
@@ -165,13 +267,28 @@
       if (!a.canvases[color]) a.canvases[color] = remapCanvas(base, SPECIAL[color]);
       return a.canvases[color];
     }
+    const pair = pairOf(color);
+    if (pair) {
+      if (!a.canvases[pair]) { const m = headsOf(ani); a.canvases[pair] = remapCanvas(base, AB.PLAYER_RGB[pair[1]], { rgb: AB.PLAYER_RGB[pair[0]], at: (j) => m[j] === 1 }); }
+      return a.canvases[pair];
+    }
     if (color < 0 || !AB.PLAYER_RGB[color]) return base;
     if (!a.canvases[color]) a.canvases[color] = remapCanvas(base, AB.PLAYER_RGB[color]);
     return a.canvases[color];
   }
   // the HD atlas to draw frame f of ani from (null: draw the original sprite)
   const hdCel = (ani, f) => { const hd = AB.hd && AB.hd.atlas(ani); return hd && !AB.hd.keepsOriginal(ani, f) ? hd : null; };
-  gfx.prewarm = function (anis, color) { for (const n of anis) { const hd = hdCel(n, 0); if ((hd ? hdFrame(n, 0, color, hd) : false) === false) source(n, color); } };
+  // frame f of ani recoloured on its own: from the HD atlas, or in team colours from the original
+  // (null: draw it from source())
+  const celOf = (a, ani, f, color, hd) => hd ? hdFrame(ani, f, color, hd) : pairOf(color) ? celFrame(ani, f, color, baseOf(a), 1, enhanced ? 'enhanced' : 'plain') : null;
+  // (with team colours, the heads of every frame: worked out now rather than mid-round)
+  gfx.prewarm = function (anis, color) {
+    for (const n of anis) {
+      if (!atlases[n]) continue;
+      if (pairOf(color)) { if (atlases[n].meta.recolor) headsOf(n); continue; }
+      const hd = hdCel(n, 0); if ((hd ? hdFrame(n, 0, color, hd) : false) === false) source(n, color);
+    }
+  };
 
   // draw frame #f of ani with its hotspot at (x,y)
   gfx.frame = function (ctx, ani, f, x, y, color, flip) {
@@ -180,7 +297,7 @@
     const fr = a.meta.frames[f];
     if (!fr) return;
     let hd = hdCel(ani, f);
-    const tinted = hd && hdFrame(ani, f, color, hd);
+    const tinted = celOf(a, ani, f, color, hd);
     if (tinted) { ctx.drawImage(tinted, Math.round(x - fr[4]), Math.round(y - fr[5]), fr[2], fr[3]); return; }
     if (tinted === false) hd = null;
     const src = hd || source(ani, color), s = hd ? AB.hd.scale() : 1;
